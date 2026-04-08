@@ -1,0 +1,15 @@
+# Client
+client/node_modules/
+client/dist/
+client/out/
+client/assets/model.vrm
+
+# Server
+server/data/companion.db
+server/__pycache__/
+server/**/__pycache__/
+server/**/*.pyc
+
+# OS
+.DS_Store
+*.log

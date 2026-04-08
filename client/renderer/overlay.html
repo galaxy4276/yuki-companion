@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 400px; height: 600px;
+      background: transparent !important;
+      overflow: hidden;
+      -webkit-app-region: no-drag;
+      user-select: none;
+    }
+
+    #canvas-wrap {
+      position: absolute;
+      bottom: 0; left: 0;
+      width: 400px; height: 540px;
+      cursor: grab;
+    }
+    #canvas-wrap:active { cursor: grabbing; }
+    canvas { display: block; }
+
+    /* 말풍선 */
+    #bubble {
+      position: absolute;
+      top: 10px; left: 10px; right: 10px;
+      background: rgba(20, 10, 40, 0.88);
+      border: 1px solid rgba(167, 139, 250, 0.6);
+      border-radius: 16px;
+      padding: 10px 14px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #f0eeff;
+      font-family: 'Segoe UI', sans-serif;
+      backdrop-filter: blur(8px);
+      max-height: 120px;
+      overflow: hidden;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    #bubble.visible { opacity: 1; }
+    #bubble::after {
+      content: '';
+      position: absolute;
+      bottom: -8px; left: 50%;
+      transform: translateX(-50%);
+      border: 8px solid transparent;
+      border-top-color: rgba(167, 139, 250, 0.6);
+      border-bottom: 0;
+    }
+
+    /* 버튼 */
+    #controls {
+      position: absolute;
+      top: 8px; right: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    #canvas-wrap:hover ~ #controls,
+    #controls:hover { opacity: 1; }
+
+    .ctrl-btn {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(30, 20, 60, 0.8);
+      color: #a78bfa;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: all;
+    }
+    .ctrl-btn:hover { background: rgba(60, 40, 120, 0.9); }
+  </style>
+</head>
+<body>
+
+<div id="bubble"></div>
+
+<div id="canvas-wrap">
+  <canvas id="vrm-canvas" width="400" height="540"></canvas>
+</div>
+
+<div id="controls">
+  <button class="ctrl-btn" id="btn-chat" title="채팅 창">💬</button>
+  <button class="ctrl-btn" id="btn-mute" title="음소거">🔊</button>
+</div>
+
+<script type="module">
+import * as THREE from '../node_modules/three/build/three.module.js'
+import { GLTFLoader } from '../node_modules/three/examples/jsm/loaders/GLTFLoader.js'
+import { VRMLoaderPlugin, VRMUtils } from '../node_modules/@pixiv/three-vrm/lib/three-vrm.module.js'
+
+// ─── Three.js 씬 (투명 배경) ─────────────────────────────────────
+const canvas   = document.getElementById('vrm-canvas')
+const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true })
+renderer.setSize(400, 540)
+renderer.setPixelRatio(window.devicePixelRatio)
+renderer.setClearColor(0x000000, 0)  // 완전 투명
+
+const scene  = new THREE.Scene()
+const camera = new THREE.PerspectiveCamera(30, 400 / 540, 0.1, 20)
+camera.position.set(0, 1.4, 3.5)
+camera.lookAt(0, 1.2, 0)
+
+const ambientLight = new THREE.AmbientLight(0xffffff, 1.2)
+const dirLight     = new THREE.DirectionalLight(0xffffff, 0.8)
+dirLight.position.set(1, 2, 2)
+scene.add(ambientLight, dirLight)
+
+// ─── VRM 로드 ─────────────────────────────────────────────────────
+let currentVrm = null
+let clock      = new THREE.Clock()
+let isTalking  = false
+let talkTimer  = 0
+
+const loader = new GLTFLoader()
+loader.register(parser => new VRMLoaderPlugin(parser))
+
+// assets/model.vrm 로드 (없으면 기본 CSS 아바타로 폴백)
+loader.load(
+  '../assets/model.vrm',
+  (gltf) => {
+    const vrm = gltf.userData.vrm
+    VRMUtils.removeUnnecessaryJoints(gltf.scene)
+    scene.add(vrm.scene)
+    currentVrm = vrm
+    vrm.scene.rotation.y = Math.PI  // 정면 바라보기
+    console.log('[VRM] 모델 로드 완료')
+  },
+  (progress) => console.log('[VRM] 로딩', Math.round(progress.loaded / progress.total * 100) + '%'),
+  (error) => {
+    console.warn('[VRM] 모델 없음, CSS 폴백 사용:', error.message)
+    useCSSAvatar()
+  }
+)
+
+// ─── CSS 폴백 아바타 ─────────────────────────────────────────────
+function useCSSAvatar() {
+  canvas.style.display = 'none'
+  const el = document.createElement('div')
+  el.id = 'css-avatar'
+  el.style.cssText = `
+    position:absolute; bottom:60px; left:50%; transform:translateX(-50%);
+    width:180px; height:260px; display:flex; flex-direction:column;
+    align-items:center; justify-content:flex-end;
+  `
+  el.innerHTML = `
+    <div style="font-size:140px; line-height:1; filter:drop-shadow(0 0 20px rgba(167,139,250,0.5))">🧝‍♀️</div>
+    <div style="font-size:11px; color:rgba(167,139,250,0.8); letter-spacing:2px; margin-top:4px">YUKI AI</div>
+  `
+  document.body.appendChild(el)
+
+  // 말할 때 흔들림
+  window._talkAnim = (talking) => {
+    el.style.animation = talking ? 'talk 0.3s ease infinite alternate' : ''
+  }
+  const style = document.createElement('style')
+  style.textContent = '@keyframes talk { from{transform:translateX(-50%) scale(1)} to{transform:translateX(-50%) scale(1.03)} }'
+  document.head.appendChild(style)
+}
+
+// ─── 애니메이션 루프 ─────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate)
+  const delta = clock.getDelta()
+
+  if (currentVrm) {
+    // 자연스러운 숨쉬기
+    const t = clock.elapsedTime
+    if (currentVrm.expressionManager) {
+      const breath = Math.sin(t * 1.5) * 0.02
+      currentVrm.scene.position.y = breath
+    }
+
+    // 눈 깜빡임 (3~5초마다)
+    if (currentVrm.expressionManager) {
+      const blinkCycle = Math.floor(t / 4) % 2 === 0
+      const blinkTime  = t % 4
+      const blink = blinkTime < 0.1 || (blinkTime > 0.15 && blinkTime < 0.25) ? 1 : 0
+      currentVrm.expressionManager.setValue('blink', blink)
+    }
+
+    // 말하는 입 애니메이션
+    if (currentVrm.expressionManager && isTalking) {
+      talkTimer += delta
+      const aa = Math.abs(Math.sin(talkTimer * 10)) * 0.6
+      currentVrm.expressionManager.setValue('aa', aa)
+    } else if (currentVrm.expressionManager) {
+      currentVrm.expressionManager.setValue('aa', 0)
+    }
+
+    currentVrm.update(delta)
+  }
+
+  renderer.render(scene, camera)
+}
+animate()
+
+// ─── 드래그 이동 ─────────────────────────────────────────────────
+let dragStart = null
+const wrap = document.getElementById('canvas-wrap')
+
+wrap.addEventListener('mousedown', (e) => {
+  dragStart = { x: e.screenX, y: e.screenY }
+  window.yukiAPI.setIgnoreMouse(false)
+})
+window.addEventListener('mousemove', (e) => {
+  if (!dragStart) return
+  const dx = e.screenX - dragStart.x
+  const dy = e.screenY - dragStart.y
+  window.yukiAPI.moveWindow(dx, dy)
+  dragStart = { x: e.screenX, y: e.screenY }
+})
+window.addEventListener('mouseup', () => {
+  dragStart = null
+})
+
+// 마우스가 캐릭터 영역에 있으면 클릭 통과 해제
+wrap.addEventListener('mouseenter', () => window.yukiAPI.setIgnoreMouse(false))
+wrap.addEventListener('mouseleave', () => { if (!dragStart) window.yukiAPI.setIgnoreMouse(true) })
+
+// ─── 말풍선 ─────────────────────────────────────────────────────
+const bubble = document.getElementById('bubble')
+let bubbleTimer = null
+
+function showBubble(text) {
+  bubble.textContent = text
+  bubble.classList.add('visible')
+  clearTimeout(bubbleTimer)
+  bubbleTimer = setTimeout(() => bubble.classList.remove('visible'), 6000)
+}
+
+// ─── 오디오 재생 ─────────────────────────────────────────────────
+let muted = false
+let audioCtx = null
+
+async function playAudio(b64) {
+  if (muted) return
+  isTalking = true
+  if (!audioCtx) audioCtx = new AudioContext()
+
+  const raw = atob(b64)
+  const buf = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i)
+
+  const decoded = await audioCtx.decodeAudioData(buf.buffer)
+  const src = audioCtx.createBufferSource()
+  src.buffer = decoded
+  src.connect(audioCtx.destination)
+  src.start()
+  src.onended = () => {
+    isTalking = false
+    talkTimer = 0
+    if (window._talkAnim) window._talkAnim(false)
+  }
+  if (window._talkAnim) window._talkAnim(true)
+}
+
+// ─── IPC 이벤트 수신 ─────────────────────────────────────────────
+window.yukiAPI.onSpeechBubble(showBubble)
+window.yukiAPI.onPlayAudio(playAudio)
+
+// ─── 컨트롤 버튼 ─────────────────────────────────────────────────
+document.getElementById('btn-chat').addEventListener('click', () => window.yukiAPI.toggleChat())
+document.getElementById('btn-mute').addEventListener('click', (e) => {
+  muted = !muted
+  e.currentTarget.textContent = muted ? '🔇' : '🔊'
+})
+</script>
+</body>
+</html>

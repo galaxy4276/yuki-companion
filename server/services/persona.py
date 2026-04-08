@@ -1,0 +1,46 @@
+import json
+import config
+
+_persona: dict = {}
+
+def load_persona():
+    global _persona
+    with open(config.PERSONA_PATH, encoding="utf-8") as f:
+        _persona = json.load(f)
+
+def build_system_prompt(context: dict) -> str:
+    ctx_str = ""
+    if context.get("cwd"):
+        ctx_str += f"현재 작업 디렉토리: {context['cwd']}. "
+    if context.get("last_command"):
+        ctx_str += f"마지막 실행 명령어: {context['last_command']}"
+        if context.get("last_exit_code") is not None:
+            status = "성공" if context["last_exit_code"] == 0 else f"실패(exit {context['last_exit_code']})"
+            ctx_str += f" ({status}). "
+    if context.get("claude_task"):
+        ctx_str += f"Claude Code 작업: {context['claude_task']}. "
+    if not ctx_str:
+        ctx_str = "특별한 상황 없음."
+
+    template = _persona.get("system_prompt", "너는 {name}이야. {context}에 대해 도움을 줘.")
+    return template.format(
+        name=_persona.get("name", "유키"),
+        personality=_persona.get("personality", ""),
+        speech_style=_persona.get("speech_style", ""),
+        context=ctx_str,
+    )
+
+def get_persona() -> dict:
+    return _persona
+
+def classify_emotion(text: str) -> tuple[str, float]:
+    text_lower = text.lower()
+    if any(k in text_lower for k in ["에러", "실패", "오류", "걱정", "힘들"]):
+        return "worried", 0.8
+    if any(k in text_lower for k in ["완료", "성공", "잘했", "수고", "축하"]):
+        return "happy", 0.9
+    if any(k in text_lower for k in ["음", "글쎄", "생각", "?", "왜"]):
+        return "thinking", 0.7
+    if any(k in text_lower for k in ["놀랍", "신기", "와", "헐"]):
+        return "surprised", 0.8
+    return "idle", 0.5
