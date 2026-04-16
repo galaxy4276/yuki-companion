@@ -1,11 +1,15 @@
 import json
 import os
+import re
 import asyncio
 import config
 from core.logging import logger
 
 _persona: dict = {}
 _loaded_mtime: float = 0.0
+
+ACTIONS = ("idle", "wave", "think", "cheer", "shrug", "point", "nod", "bow")
+_ACTION_RE = re.compile(r"\[action:(\w+)\]")
 
 def load_persona():
     global _persona, _loaded_mtime
@@ -55,3 +59,59 @@ def classify_emotion(text: str) -> tuple[str, float]:
     if any(k in t for k in ["음", "글쎄", "생각", "?", "왜"]): return "thinking", 0.7
     if any(k in t for k in ["놀랍", "신기", "와", "헐"]): return "surprised", 0.8
     return "idle", 0.5
+
+
+def extract_action(text: str) -> tuple[str, str | None]:
+    """LLM 응답에서 [action:xxx] 태그 제거 + 액션명 반환. 없으면 emotion→action fallback."""
+    m = _ACTION_RE.search(text)
+    if m:
+        name = m.group(1)
+        cleaned = _ACTION_RE.sub("", text, count=1).lstrip()
+        if name in ACTIONS:
+            return cleaned, name
+        return cleaned, None
+    emotion, _ = classify_emotion(text)
+    fallback = {"happy": "cheer", "worried": "shrug", "thinking": "think",
+                "surprised": "nod", "idle": "idle"}.get(emotion)
+    return text, fallback
+
+
+class ActionTagStripper:
+    """스트림 청크에서 선두 [action:xxx] 태그를 제거. 첫 태그만 처리."""
+    def __init__(self):
+        self._buf = ""
+        self._done = False
+        self.action: str | None = None
+
+    def feed(self, chunk: str) -> str:
+        if self._done:
+            return chunk
+        self._buf += chunk
+        stripped = self._buf.lstrip()
+        if not stripped:
+            return ""
+        if not stripped.startswith("["):
+            self._done = True
+            out, self._buf = self._buf, ""
+            return out
+        m = _ACTION_RE.match(stripped)
+        if m:
+            self._done = True
+            name = m.group(1)
+            if name in ACTIONS:
+                self.action = name
+            tail = stripped[m.end():]
+            self._buf = ""
+            return tail
+        if len(self._buf) > 40:
+            self._done = True
+            out, self._buf = self._buf, ""
+            return out
+        return ""
+
+    def flush(self) -> str:
+        if self._done:
+            return ""
+        self._done = True
+        out, self._buf = self._buf, ""
+        return out

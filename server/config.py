@@ -8,6 +8,8 @@ GEMMA_MAX_TOKENS = 2048
 
 # TTS
 TTS_URL = "http://localhost:8880"
+TTS_USERNAME = os.environ.get("TTS_USERNAME", "tts")
+TTS_PASSWORD = os.environ.get("TTS_PASSWORD", "SmartNewbie!0705")
 
 # STT
 WHISPER_MODEL  = "medium"

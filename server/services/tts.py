@@ -3,7 +3,10 @@ import httpx
 import config
 from core.logging import logger
 
-_client = httpx.AsyncClient(timeout=60.0)
+_client = httpx.AsyncClient(
+    timeout=60.0,
+    auth=httpx.BasicAuth(config.TTS_USERNAME, config.TTS_PASSWORD),
+)
 _SENTENCE_END_CHARS = ('.', '!', '?', '。', '？', '！', '…')
 MAX_CHUNK_CHARS = 200
 

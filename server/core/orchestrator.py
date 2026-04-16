@@ -101,12 +101,15 @@ async def _tool_loop(messages: list[dict], tools: list[dict]) -> list[dict]:
     return messages
 
 async def _emit_text_only(msg: str, msg_id: str):
-    """LLM 스킵 시 text_chunk + text_done + emotion + TTS."""
-    await _send({"type": "text_chunk", "content": msg, "is_final": False, "message_id": msg_id})
-    await _send({"type": "text_done", "message_id": msg_id, "full_content": msg})
-    emotion, intensity = persona.classify_emotion(msg)
+    """LLM 스킵 시 text_chunk + text_done + emotion + action + TTS."""
+    cleaned, action = persona.extract_action(msg)
+    await _send({"type": "text_chunk", "content": cleaned, "is_final": False, "message_id": msg_id})
+    await _send({"type": "text_done", "message_id": msg_id, "full_content": cleaned})
+    emotion, intensity = persona.classify_emotion(cleaned)
     await _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity})
-    await _dispatch_tts(msg, msg_id)
+    if action:
+        await _send({"type": "avatar_action", "action": action})
+    await _dispatch_tts(cleaned, msg_id)
 
 async def handle_message(content: str, session_id: str, event_type: str = "text"):
     msg_id = str(uuid.uuid4())[:8]
@@ -131,18 +134,32 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     messages = await _tool_loop(messages, tools)
 
     await _send({"type": "avatar_emotion", "emotion": "thinking", "intensity": 0.7})
+    await _send({"type": "avatar_action", "action": "think"})
 
     full_text = ""
     chunker = tts.SentenceChunker()
     tts_tasks: list[asyncio.Task] = []
+    stripper = persona.ActionTagStripper()
+    action_sent = False
 
     async for chunk, is_final in llm.stream_response(messages):
         if not is_final:
-            full_text += chunk
-            await _send({"type": "text_chunk", "content": chunk, "is_final": False, "message_id": msg_id})
-            for sentence in chunker.feed(chunk):
-                tts_tasks.append(_track(_dispatch_tts(sentence, msg_id)))
+            cleaned = stripper.feed(chunk)
+            if not action_sent and stripper.action:
+                action_sent = True
+                await _send({"type": "avatar_action", "action": stripper.action})
+            if cleaned:
+                full_text += cleaned
+                await _send({"type": "text_chunk", "content": cleaned, "is_final": False, "message_id": msg_id})
+                for sentence in chunker.feed(cleaned):
+                    tts_tasks.append(_track(_dispatch_tts(sentence, msg_id)))
         else:
+            leftover = stripper.flush()
+            if leftover:
+                full_text += leftover
+                await _send({"type": "text_chunk", "content": leftover, "is_final": False, "message_id": msg_id})
+                for sentence in chunker.feed(leftover):
+                    tts_tasks.append(_track(_dispatch_tts(sentence, msg_id)))
             await _send({"type": "text_done", "message_id": msg_id, "full_content": full_text})
 
     tail = chunker.finalize()
@@ -152,6 +169,10 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     await history.save_message(session_id, "assistant", full_text, event_type)
     emotion, intensity = persona.classify_emotion(full_text)
     await _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity})
+    if not action_sent:
+        _, fallback = persona.extract_action(full_text)
+        if fallback:
+            await _send({"type": "avatar_action", "action": fallback})
     await asyncio.gather(*tts_tasks, return_exceptions=True)
     _track(_maybe_summarize(session_id))
 

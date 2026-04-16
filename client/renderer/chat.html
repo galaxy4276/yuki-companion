@@ -181,7 +181,7 @@ function handle(data) {
       break
 
     case 'audio_response':
-      window.yukiAPI.relayAudio(data.data)
+      // overlay가 WS로 audio_response 직접 수신. 여기서 relay 불필요.
       break
 
     case 'stt_result':

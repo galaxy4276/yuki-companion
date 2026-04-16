@@ -77,6 +77,47 @@
       pointer-events: all;
     }
     .ctrl-btn:hover { background: rgba(60, 40, 120, 0.9); }
+
+    /* 인라인 채팅 바 */
+    #chat-bar {
+      position: absolute;
+      bottom: 8px; left: 8px; right: 8px;
+      display: flex; gap: 4px; align-items: center;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+      z-index: 20;
+    }
+    body:hover #chat-bar,
+    #chat-bar:focus-within { opacity: 1; pointer-events: auto; }
+    #chat-input {
+      flex: 1;
+      background: rgba(20, 10, 40, 0.92);
+      border: 1px solid rgba(167, 139, 250, 0.5);
+      border-radius: 14px;
+      padding: 7px 12px;
+      font-size: 12px;
+      color: #f0eeff;
+      font-family: 'Segoe UI', sans-serif;
+      outline: none;
+      backdrop-filter: blur(10px);
+    }
+    #chat-input::placeholder { color: rgba(240, 238, 255, 0.4); }
+    #chat-input:focus { border-color: rgba(167, 139, 250, 0.95); }
+    #chat-send {
+      width: 30px; height: 30px; border-radius: 50%;
+      background: #7c3aed; color: white; border: none;
+      font-size: 13px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #chat-send:hover { background: #6d28d9; }
+    #chat-send:disabled { background: #3a2a5a; cursor: default; }
+    #ws-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #ef4444;
+      transition: background 0.3s;
+    }
+    #ws-dot.ok { background: #4ade80; }
   </style>
 </head>
 <body>
@@ -92,9 +133,23 @@
   <button class="ctrl-btn" id="btn-mute" title="음소거">🔊</button>
 </div>
 
+<div id="chat-bar">
+  <span id="ws-dot" title="연결 상태"></span>
+  <input id="chat-input" type="text" placeholder="유키에게 말 걸기..." autocomplete="off" />
+  <button id="chat-send">▶</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "../node_modules/three/build/three.module.js",
+    "three/": "../node_modules/three/"
+  }
+}
+</script>
 <script type="module">
-import * as THREE from '../node_modules/three/build/three.module.js'
-import { GLTFLoader } from '../node_modules/three/examples/jsm/loaders/GLTFLoader.js'
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { VRMLoaderPlugin, VRMUtils } from '../node_modules/@pixiv/three-vrm/lib/three-vrm.module.js'
 
 // ─── Three.js 씬 (투명 배경) ─────────────────────────────────────
@@ -120,23 +175,76 @@ let clock      = new THREE.Clock()
 let isTalking  = false
 let talkTimer  = 0
 
+// on-screen debug (투명 배경 위 흰 텍스트)
+const debugEl = document.createElement('div')
+debugEl.style.cssText = 'position:absolute;top:2px;left:2px;color:#0f0;font-size:10px;font-family:monospace;background:rgba(0,0,0,0.5);padding:2px 4px;z-index:99;pointer-events:none;max-width:380px;white-space:pre-wrap'
+document.body.appendChild(debugEl)
+const dbg = (m) => { debugEl.textContent = m; console.log('[VRM]', m) }
+
+dbg('init: THREE=' + (typeof THREE) + ' GLTF=' + (typeof GLTFLoader) + ' VRMPlugin=' + (typeof VRMLoaderPlugin))
+
 const loader = new GLTFLoader()
 loader.register(parser => new VRMLoaderPlugin(parser))
 
-// assets/model.vrm 로드 (없으면 기본 CSS 아바타로 폴백)
 loader.load(
   '../assets/model.vrm',
   (gltf) => {
-    const vrm = gltf.userData.vrm
-    VRMUtils.removeUnnecessaryJoints(gltf.scene)
-    scene.add(vrm.scene)
-    currentVrm = vrm
-    vrm.scene.rotation.y = Math.PI  // 정면 바라보기
-    console.log('[VRM] 모델 로드 완료')
+    try {
+      const vrm = gltf.userData.vrm
+      if (!vrm) {
+        dbg('ERROR: gltf.userData.vrm null — VRMLoaderPlugin 미작동?')
+        useCSSAvatar()
+        return
+      }
+      try { VRMUtils.removeUnnecessaryJoints(gltf.scene) } catch (e) { dbg('joints skip: ' + e.message) }
+      try { VRMUtils.rotateVRM0(vrm) } catch (e) { /* VRM 1.0 파일이면 필요없음 */ }
+      scene.add(vrm.scene)
+      currentVrm = vrm
+
+      // idle 포즈 (팔 내림 + 살짝 굽힘)
+      try {
+        const h = vrm.humanoid
+        const r = (name, x=0, y=0, z=0) => {
+          const b = h?.getNormalizedBoneNode?.(name) || h?.getBoneNode?.(name)
+          if (b) b.rotation.set(
+            THREE.MathUtils.degToRad(x),
+            THREE.MathUtils.degToRad(y),
+            THREE.MathUtils.degToRad(z),
+          )
+        }
+        r('leftUpperArm',  0, 0, -72)
+        r('rightUpperArm', 0, 0,  72)
+        r('leftLowerArm',  -5, 0, -8)
+        r('rightLowerArm', -5, 0,  8)
+        r('leftShoulder',  0, 0, -5)
+        r('rightShoulder', 0, 0,  5)
+        r('leftHand',  0, 0, -5)
+        r('rightHand', 0, 0,  5)
+      } catch (e) { dbg('pose skip: ' + e.message) }
+
+      // 자동 카메라 프레이밍: 바운딩 박스 계산
+      const box = new THREE.Box3().setFromObject(vrm.scene)
+      const center = box.getCenter(new THREE.Vector3())
+      const size = box.getSize(new THREE.Vector3())
+      const maxDim = Math.max(size.x, size.y, size.z)
+      // 얼굴·상체만: 모델 top에서 아래로 0.3m 쯤
+      const focusY = box.max.y - size.y * 0.15
+      camera.position.set(center.x, focusY, center.z + Math.max(1.5, maxDim * 1.2))
+      camera.lookAt(center.x, focusY, center.z)
+
+      dbg('OK: size=' + size.x.toFixed(2) + 'x' + size.y.toFixed(2) + 'x' + size.z.toFixed(2) +
+          ' center=(' + center.x.toFixed(2) + ',' + center.y.toFixed(2) + ',' + center.z.toFixed(2) + ')')
+      setTimeout(() => { debugEl.style.display = 'none' }, 5000)
+    } catch (e) {
+      dbg('SETUP ERROR: ' + e.message)
+      useCSSAvatar()
+    }
   },
-  (progress) => console.log('[VRM] 로딩', Math.round(progress.loaded / progress.total * 100) + '%'),
+  (progress) => {
+    if (progress.total) dbg('loading ' + Math.round(progress.loaded / progress.total * 100) + '%')
+  },
   (error) => {
-    console.warn('[VRM] 모델 없음, CSS 폴백 사용:', error.message)
+    dbg('LOAD ERROR: ' + (error?.message || error))
     useCSSAvatar()
   }
 )
@@ -283,6 +391,76 @@ function applyEmotion(emotion, intensity) {
   }
 }
 window.yukiAPI.onAvatarEmotion(({emotion, intensity}) => applyEmotion(emotion, intensity))
+
+// ─── 인라인 채팅 + WS 직접 연결 ─────────────────────────────────
+const chatInput = document.getElementById('chat-input')
+const chatSend = document.getElementById('chat-send')
+const wsDot = document.getElementById('ws-dot')
+const chatBar = document.getElementById('chat-bar')
+let ws = null
+let streamText = ''
+
+async function connectWS() {
+  const cfg = await window.yukiAPI.getConfig()
+  ws = new WebSocket(cfg.WS_URL)
+  ws.onopen = () => wsDot.classList.add('ok')
+  ws.onclose = () => { wsDot.classList.remove('ok'); setTimeout(connectWS, 3000) }
+  ws.onmessage = (e) => {
+    const d = JSON.parse(e.data)
+    switch (d.type) {
+      case 'text_chunk':
+        streamText += d.content
+        showBubble(streamText)
+        break
+      case 'text_done':
+        // 6초 후 자동 페이드. 이미 showBubble setTimeout 처리
+        streamText = ''
+        break
+      case 'audio_response':
+        playAudio(d.data)
+        break
+      case 'avatar_emotion':
+        applyEmotion(d.emotion, d.intensity)
+        break
+    }
+  }
+}
+connectWS()
+
+function sendChat() {
+  const text = chatInput.value.trim()
+  console.log('[chat] send attempt', {text, wsState: ws?.readyState})
+  if (!text) return
+  if (ws?.readyState !== WebSocket.OPEN) {
+    showBubble('⚠️ 서버 연결 안됨')
+    return
+  }
+  streamText = ''
+  ws.send(JSON.stringify({ type: 'text_message', content: text, session_id: 'default' }))
+  chatInput.value = ''
+  showBubble(`나: ${text}`)
+}
+
+chatInput.addEventListener('keydown', (e) => {
+  // IME 조합 중 Enter는 무시 (한글 입력 확정용)
+  if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
+    e.preventDefault()
+    sendChat()
+  }
+})
+chatSend.addEventListener('click', sendChat)
+
+// chat bar 영역은 항상 클릭 가능
+chatBar.addEventListener('mouseenter', () => window.yukiAPI.setIgnoreMouse(false))
+chatBar.addEventListener('mouseleave', () => {
+  if (document.activeElement !== chatInput && !dragStart) {
+    window.yukiAPI.setIgnoreMouse(true)
+  }
+})
+chatInput.addEventListener('focus', () => window.yukiAPI.setIgnoreMouse(false))
+chatInput.addEventListener('blur', () => {
+  if (!chatBar.matches(':hover')) window.yukiAPI.setIgnoreMouse(true)
+})
 
 // ─── 컨트롤 버튼 ─────────────────────────────────────────────────
 document.getElementById('btn-chat').addEventListener('click', () => window.yukiAPI.toggleChat())

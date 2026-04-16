@@ -31,6 +31,7 @@ function createOverlay() {
   })
 
   mainWin.loadFile(path.join(__dirname, 'renderer', 'overlay.html'))
+  mainWin.webContents.openDevTools({ mode: 'detach' })
   mainWin.setAlwaysOnTop(true, 'screen-saver')  // 최상단 레벨
   mainWin.setVisibleOnAllWorkspaces(true)         // 모든 데스크톱에 표시
 
