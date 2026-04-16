@@ -39,3 +39,5 @@ RECENT_CMD_RING_SIZE = 10
 
 HISTORY_ROLLING_TURNS = 20
 HISTORY_SUMMARY_ON_OVERFLOW = 10
+
+PROACTIVE_TEMPLATES_PATH = os.path.join(os.path.dirname(__file__), "data", "proactive_templates.json")

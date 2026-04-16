@@ -139,3 +139,23 @@ async def handle_claude_hook(hook_type: str, payload: dict, session_id: str):
     handler = CLAUDE_HOOK_HANDLERS.get(hook_type)
     if handler:
         await handler(payload, session_id)
+
+async def handle_templated(template_key: str, session_id: str, context: dict = None):
+    """LLM 스킵, 템플릿에서 랜덤 선택 → TTS 직송."""
+    import json as _json
+    import random as _random
+    try:
+        with open(config.PROACTIVE_TEMPLATES_PATH, encoding="utf-8") as f:
+            templates = _json.load(f)
+    except Exception:
+        return
+    pool = templates.get(template_key, [])
+    if not pool:
+        return
+    msg = _random.choice(pool).format(**(context or {}))
+    await history.save_message(session_id, "assistant", msg, f"proactive_{template_key}")
+    await _send({"type": "text_chunk", "content": msg, "is_final": False, "message_id": "tpl"})
+    await _send({"type": "text_done", "message_id": "tpl", "full_content": msg})
+    emotion, intensity = persona.classify_emotion(msg)
+    await _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity})
+    await _dispatch_tts(msg, "tpl")

@@ -13,7 +13,7 @@ async def _send_proactive(msg: str):
 
 async def _check_idle():
     if ctx.idle_seconds() >= config.IDLE_TRIGGER_MINUTES * 60:
-        await _send_proactive("한동안 조용하네. 막힌 거야, 아니면 생각 중이야?")
+        await orchestrator.handle_templated("idle", DEFAULT_SESSION)
 
 async def _check_night():
     global _last_night_trigger
@@ -24,7 +24,7 @@ async def _check_night():
     if elapsed < config.NIGHT_TRIGGER_COOLDOWN_HOURS * 3600:
         return
     _last_night_trigger = time.time()
-    await _send_proactive(f"지금 {hour}시잖아. 이 시간에도 코딩 중이야? 좀 쉬어야 하지 않아?")
+    await orchestrator.handle_templated("night", DEFAULT_SESSION, {"hour": hour})
 
 async def run():
     while True:
