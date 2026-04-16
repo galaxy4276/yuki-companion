@@ -94,6 +94,8 @@ async def _dispatch_tts(text: str, msg_id: str):
     wav = await tts.synthesize(text)
     if wav:
         await _send({"type": "audio_response", "data": tts.to_base64(wav), "message_id": msg_id})
+    else:
+        await _send({"type": "error", "source": "tts", "message": "TTS 합성 실패"})
 
 async def handle_terminal_event(command: str, exit_code: int, duration_ms: int, cwd: str, session_id: str):
     ctx.update("cwd", cwd)
