@@ -79,6 +79,14 @@ async def handle_ws(websocket: WebSocket):
                     session_id,
                 ))
 
+            elif msg_type == "screen_capture":
+                import base64 as _b64
+                from core import context as _ctx
+                try:
+                    _ctx.set_screenshot(_b64.b64decode(data["data"]))
+                except Exception:
+                    pass
+
     except WebSocketDisconnect:
         _connections.discard(websocket)
 
