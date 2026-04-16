@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut } = require('electron')
+const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut, desktopCapturer } = require('electron')
 const path = require('path')
 
 const SERVER_URL = 'http://125.242.221.180:8002'
@@ -112,6 +112,13 @@ ipcMain.on('avatar-emotion', (_, payload) => {
 
 ipcMain.handle('get-config', () => ({ WS_URL, SERVER_URL }))
 
+ipcMain.handle('capture-screen', async () => {
+  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1280, height: 800 } })
+  if (sources.length === 0) return null
+  const thumb = sources[0].thumbnail.toJPEG(70)
+  return thumb.toString('base64')
+})
+
 // ─── 앱 시작 ─────────────────────────────────────────────────────
 app.whenReady().then(() => {
   createOverlay()
@@ -120,6 +127,9 @@ app.whenReady().then(() => {
   globalShortcut.register('Alt+Shift+Space', () => {
     chatWin?.show()
     chatWin?.webContents.send('global-ptt-toggle')
+  })
+  globalShortcut.register('Alt+Shift+S', async () => {
+    chatWin?.webContents.send('screen-capture-trigger')
   })
 })
 
