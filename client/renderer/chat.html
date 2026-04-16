@@ -89,6 +89,12 @@
 
     ::-webkit-scrollbar { width: 3px; }
     ::-webkit-scrollbar-thumb { background: #2a2a4a; border-radius: 2px; }
+
+    #toast { position: absolute; bottom: 70px; left: 10px; right: 10px;
+      background: #3a1e1e; border: 1px solid #5a2a2a; color: #f87171;
+      padding: 8px 12px; border-radius: 8px; font-size: 12px;
+      opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 10; }
+    #toast.show { opacity: 1; }
   </style>
 </head>
 <body>
@@ -101,6 +107,8 @@
 
 <div id="messages"></div>
 <div id="stt-hint"></div>
+
+<div id="toast"></div>
 
 <div id="input-row">
   <button id="ptt-btn">🎤</button>
@@ -118,6 +126,9 @@ let muted = false
 async function init() {
   config = await window.yukiAPI.getConfig()
   connect()
+  window.yukiAPI.onGlobalPttToggle(() => {
+    if (isRecording) stopRec(); else startRec()
+  })
 }
 
 // ─── WebSocket ───────────────────────────────────────────────────
@@ -138,6 +149,14 @@ function connect() {
 function send(payload) {
   if (ws?.readyState === WebSocket.OPEN)
     ws.send(JSON.stringify({ ...payload, session_id: session }))
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast')
+  if (!t) return
+  t.textContent = msg
+  t.classList.add('show')
+  setTimeout(() => t.classList.remove('show'), 5000)
 }
 
 // ─── 서버 메시지 처리 ────────────────────────────────────────────
@@ -163,6 +182,10 @@ function handle(data) {
       document.getElementById('stt-hint').textContent = `인식: "${data.text}"`
       addMsg('user', data.text)
       setTimeout(() => document.getElementById('stt-hint').textContent = '', 3000)
+      break
+
+    case 'error':
+      showToast(`${data.source || 'error'}: ${data.message}`)
       break
 
     case 'avatar_emotion':
@@ -204,18 +227,44 @@ const pttBtn = document.getElementById('ptt-btn')
 pttBtn.addEventListener('mousedown', startRec)
 pttBtn.addEventListener('mouseup', stopRec)
 
+let vadStream, vadCtx, vadAnalyser, vadRaf, vadStartTime = 0
 async function startRec() {
   if (isRecording) return
-  isRecording = true; audioChunks = []
+  isRecording = true; audioChunks = []; vadStartTime = Date.now()
   pttBtn.classList.add('recording'); pttBtn.textContent = '⏹'
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-  mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+  vadStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  mediaRecorder = new MediaRecorder(vadStream, { mimeType: 'audio/webm' })
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data) }
   mediaRecorder.start(200)
+
+  vadCtx = new AudioContext()
+  const src = vadCtx.createMediaStreamSource(vadStream)
+  vadAnalyser = vadCtx.createAnalyser()
+  vadAnalyser.fftSize = 512
+  src.connect(vadAnalyser)
+  const data = new Uint8Array(vadAnalyser.fftSize)
+  let silenceStart = 0
+  const loop = () => {
+    if (!isRecording) return
+    vadAnalyser.getByteTimeDomainData(data)
+    let sum = 0
+    for (let i = 0; i < data.length; i++) { const v = (data[i]-128)/128; sum += v*v }
+    const rms = Math.sqrt(sum / data.length)
+    const now = Date.now()
+    if (rms < 0.02) {
+      if (silenceStart === 0) silenceStart = now
+      if (now - silenceStart > 800 && now - vadStartTime > 500) { stopRec(); return }
+    } else { silenceStart = 0 }
+    vadRaf = requestAnimationFrame(loop)
+  }
+  loop()
 }
+
 async function stopRec() {
   if (!isRecording) return
   isRecording = false
+  if (vadRaf) cancelAnimationFrame(vadRaf)
+  try { vadCtx?.close() } catch {}
   pttBtn.classList.remove('recording'); pttBtn.textContent = '🎤'
   mediaRecorder.stop()
   mediaRecorder.stream.getTracks().forEach(t => t.stop())
@@ -241,7 +290,7 @@ async function playAudio(b64) {
   src.start()
 }
 
-document.getElementById('close-btn').onclick = () => window.close()
+document.getElementById('close-btn').onclick = () => window.yukiAPI.hideChat()
 
 init()
 </script>

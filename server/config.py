@@ -4,7 +4,7 @@ import os
 GEMMA_BASE_URL = "http://localhost:8001/v1"
 GEMMA_API_KEY  = "w7PhLd603vZQ8Om-Ys7wHeK6CZyzK4ngp1lwsYh2oyQ"
 GEMMA_MODEL    = "gemma-4"
-GEMMA_MAX_TOKENS = 512
+GEMMA_MAX_TOKENS = 2048
 
 # TTS
 TTS_URL = "http://localhost:8880"
@@ -36,3 +36,8 @@ CLAUDE_POSTTOOL_TOOLS = {"Edit", "Write", "MultiEdit"}
 
 REPEAT_FAIL_THRESHOLD = 3
 RECENT_CMD_RING_SIZE = 10
+
+HISTORY_ROLLING_TURNS = 20
+HISTORY_SUMMARY_ON_OVERFLOW = 10
+
+PROACTIVE_TEMPLATES_PATH = os.path.join(os.path.dirname(__file__), "data", "proactive_templates.json")

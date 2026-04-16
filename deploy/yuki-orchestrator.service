@@ -1,0 +1,16 @@
+[Unit]
+Description=Yuki Companion Orchestrator
+After=network.target yuki-llm.service
+Wants=yuki-llm.service
+
+[Service]
+Type=simple
+User=deveungu
+WorkingDirectory=/home/deveungu/vtuber-companion/server
+ExecStart=/usr/bin/python3 main.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

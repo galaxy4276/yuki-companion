@@ -1,12 +1,28 @@
 import json
+import os
+import asyncio
 import config
+from core.logging import logger
 
 _persona: dict = {}
+_loaded_mtime: float = 0.0
 
 def load_persona():
-    global _persona
+    global _persona, _loaded_mtime
     with open(config.PERSONA_PATH, encoding="utf-8") as f:
         _persona = json.load(f)
+    _loaded_mtime = os.path.getmtime(config.PERSONA_PATH)
+    logger.info(f"[Persona] 로드 완료: {_persona.get('name')}")
+
+async def watch_persona():
+    while True:
+        await asyncio.sleep(60)
+        try:
+            mtime = os.path.getmtime(config.PERSONA_PATH)
+            if mtime != _loaded_mtime:
+                load_persona()
+        except Exception as e:
+            logger.warning(f"[Persona] watch 오류: {e}")
 
 def build_system_prompt(context: dict) -> str:
     ctx_str = ""
@@ -21,8 +37,7 @@ def build_system_prompt(context: dict) -> str:
         ctx_str += f"Claude Code 작업: {context['claude_task']}. "
     if not ctx_str:
         ctx_str = "특별한 상황 없음."
-
-    template = _persona.get("system_prompt", "너는 {name}이야. {context}에 대해 도움을 줘.")
+    template = _persona.get("system_prompt", "너는 {name}이야.")
     return template.format(
         name=_persona.get("name", "유키"),
         personality=_persona.get("personality", ""),
@@ -34,13 +49,9 @@ def get_persona() -> dict:
     return _persona
 
 def classify_emotion(text: str) -> tuple[str, float]:
-    text_lower = text.lower()
-    if any(k in text_lower for k in ["에러", "실패", "오류", "걱정", "힘들"]):
-        return "worried", 0.8
-    if any(k in text_lower for k in ["완료", "성공", "잘했", "수고", "축하"]):
-        return "happy", 0.9
-    if any(k in text_lower for k in ["음", "글쎄", "생각", "?", "왜"]):
-        return "thinking", 0.7
-    if any(k in text_lower for k in ["놀랍", "신기", "와", "헐"]):
-        return "surprised", 0.8
+    t = text.lower()
+    if any(k in t for k in ["에러", "실패", "오류", "걱정", "힘들"]): return "worried", 0.8
+    if any(k in t for k in ["완료", "성공", "잘했", "수고", "축하"]): return "happy", 0.9
+    if any(k in t for k in ["음", "글쎄", "생각", "?", "왜"]): return "thinking", 0.7
+    if any(k in t for k in ["놀랍", "신기", "와", "헐"]): return "surprised", 0.8
     return "idle", 0.5

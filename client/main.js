@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut } = require('electron')
 const path = require('path')
 
 const SERVER_URL = 'http://125.242.221.180:8002'
@@ -117,7 +117,13 @@ app.whenReady().then(() => {
   createOverlay()
   createChatWindow()
   createTray()
+  globalShortcut.register('Alt+Shift+Space', () => {
+    chatWin?.show()
+    chatWin?.webContents.send('global-ptt-toggle')
+  })
 })
+
+app.on('will-quit', () => { globalShortcut.unregisterAll() })
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

@@ -34,6 +34,21 @@ def _log_exc(task: asyncio.Task):
     if not task.cancelled() and task.exception():
         print(f"[Orchestrator] 태스크 오류: {task.exception()}")
 
+async def _maybe_summarize(session_id: str):
+    total = await history.count_turns(session_id)
+    if total <= config.HISTORY_ROLLING_TURNS:
+        return
+    to_summarize = await history.get_turns_range(session_id, 0, config.HISTORY_SUMMARY_ON_OVERFLOW)
+    if not to_summarize:
+        return
+    transcript = "\n".join(f"{t['role']}: {t['content']}" for t in to_summarize)
+    prompt = [
+        {"role": "system", "content": "아래 대화를 3~5문장으로 한국어 요약해."},
+        {"role": "user", "content": transcript},
+    ]
+    summary = await llm.complete_once(prompt)
+    await history.save_summary(session_id, summary, f"0-{config.HISTORY_SUMMARY_ON_OVERFLOW}")
+
 async def handle_message(content: str, session_id: str, event_type: str = "text"):
     msg_id = str(uuid.uuid4())[:8]
 
@@ -41,8 +56,12 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     ctx.touch()
 
     system_prompt = persona.build_system_prompt(ctx.get())
-    recent = await history.get_recent(session_id, limit=20)
-    messages = [{"role": "system", "content": system_prompt}] + recent
+    recent = await history.get_recent(session_id, limit=config.HISTORY_ROLLING_TURNS)
+    summary = await history.get_latest_summary(session_id)
+    messages = [{"role": "system", "content": system_prompt}]
+    if summary:
+        messages.append({"role": "system", "content": f"이전 대화 요약: {summary}"})
+    messages.extend(recent)
 
     await _send({"type": "avatar_emotion", "emotion": "thinking", "intensity": 0.7})
 
@@ -67,6 +86,7 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     emotion, intensity = persona.classify_emotion(full_text)
     await _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity})
     await asyncio.gather(*tts_tasks, return_exceptions=True)
+    asyncio.create_task(_maybe_summarize(session_id))
 
 async def _dispatch_tts(text: str, msg_id: str):
     if not text:
@@ -74,6 +94,8 @@ async def _dispatch_tts(text: str, msg_id: str):
     wav = await tts.synthesize(text)
     if wav:
         await _send({"type": "audio_response", "data": tts.to_base64(wav), "message_id": msg_id})
+    else:
+        await _send({"type": "error", "source": "tts", "message": "TTS 합성 실패"})
 
 async def handle_terminal_event(command: str, exit_code: int, duration_ms: int, cwd: str, session_id: str):
     ctx.update("cwd", cwd)
@@ -119,3 +141,23 @@ async def handle_claude_hook(hook_type: str, payload: dict, session_id: str):
     handler = CLAUDE_HOOK_HANDLERS.get(hook_type)
     if handler:
         await handler(payload, session_id)
+
+async def handle_templated(template_key: str, session_id: str, context: dict = None):
+    """LLM 스킵, 템플릿에서 랜덤 선택 → TTS 직송."""
+    import json as _json
+    import random as _random
+    try:
+        with open(config.PROACTIVE_TEMPLATES_PATH, encoding="utf-8") as f:
+            templates = _json.load(f)
+    except Exception:
+        return
+    pool = templates.get(template_key, [])
+    if not pool:
+        return
+    msg = _random.choice(pool).format(**(context or {}))
+    await history.save_message(session_id, "assistant", msg, f"proactive_{template_key}")
+    await _send({"type": "text_chunk", "content": msg, "is_final": False, "message_id": "tpl"})
+    await _send({"type": "text_done", "message_id": "tpl", "full_content": msg})
+    emotion, intensity = persona.classify_emotion(msg)
+    await _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity})
+    await _dispatch_tts(msg, "tpl")

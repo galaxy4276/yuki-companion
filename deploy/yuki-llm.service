@@ -1,0 +1,14 @@
+[Unit]
+Description=llama.cpp Gemma 4 Server
+After=network.target
+
+[Service]
+Type=simple
+User=deveungu
+WorkingDirectory=/home/deveungu/vtuber-companion
+ExecStart=/home/deveungu/vtuber-companion/scripts/start-llm.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
