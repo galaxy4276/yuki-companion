@@ -8,10 +8,15 @@ _state = {
     "last_activity": time.time(),
 }
 
-def update(key: str, value):
-    if key != "last_activity":
-        _state[key] = value
+def touch():
+    """활동 발생 시 호출, last_activity만 갱신."""
     _state["last_activity"] = time.time()
+
+def update(key: str, value):
+    """일반 상태 갱신. last_activity는 자동 갱신 안함."""
+    if key == "last_activity":
+        raise ValueError("use touch() instead")
+    _state[key] = value
 
 def get() -> dict:
     return dict(_state)
