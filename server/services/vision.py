@@ -1,7 +1,6 @@
 import base64
 import shutil
 import subprocess
-import tempfile
 import config
 from core.logging import logger
 from core import context
@@ -11,13 +10,9 @@ def _ocr(image_bytes: bytes) -> str:
         logger.warning("[Vision] tesseract 미설치")
         return ""
     try:
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-            f.write(image_bytes)
-            f.flush()
-            path = f.name
         proc = subprocess.run(
-            ["tesseract", path, "-", "-l", config.OCR_LANGUAGES],
-            capture_output=True, timeout=30,
+            ["tesseract", "stdin", "stdout", "-l", config.OCR_LANGUAGES],
+            input=image_bytes, capture_output=True, timeout=30,
         )
         return proc.stdout.decode("utf-8", errors="ignore").strip()
     except Exception as e:

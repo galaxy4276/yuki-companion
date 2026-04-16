@@ -1,4 +1,7 @@
 import asyncio
+import json
+import os
+import random
 import time
 import uuid
 from collections import deque
@@ -10,12 +13,29 @@ import services.llm as llm
 import services.tts as tts
 import services.persona as persona
 from services import mcp_client
+from services import vision
 import core.context as ctx
 from core.logging import logger
 
 _broadcaster: Callable[[dict], Awaitable[None]] | None = None
 _tasks: set[asyncio.Task] = set()
 _recent_cmds: deque = deque(maxlen=config.RECENT_CMD_RING_SIZE)
+
+_templates_cache: dict = {"mtime": 0.0, "data": None}
+
+def _load_templates() -> dict:
+    try:
+        mtime = os.path.getmtime(config.PROACTIVE_TEMPLATES_PATH)
+        if _templates_cache["data"] is not None and mtime == _templates_cache["mtime"]:
+            return _templates_cache["data"]
+        with open(config.PROACTIVE_TEMPLATES_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        _templates_cache["mtime"] = mtime
+        _templates_cache["data"] = data
+        return data
+    except Exception as e:
+        logger.warning(f"[Templates] 로드 실패: {e}")
+        return {}
 
 def set_broadcaster(fn: Callable[[dict], Awaitable[None]]):
     global _broadcaster
@@ -34,7 +54,7 @@ def _track(coro) -> asyncio.Task:
 
 def _log_exc(task: asyncio.Task):
     if not task.cancelled() and task.exception():
-        print(f"[Orchestrator] 태스크 오류: {task.exception()}")
+        logger.error(f"[Orchestrator] 태스크 오류: {task.exception()}")
 
 async def _maybe_summarize(session_id: str):
     total = await history.count_turns(session_id)
@@ -51,11 +71,8 @@ async def _maybe_summarize(session_id: str):
     summary = await llm.complete_once(prompt)
     await history.save_summary(session_id, summary, f"0-{config.HISTORY_SUMMARY_ON_OVERFLOW}")
 
-async def _tool_loop(messages: list[dict]) -> list[dict]:
-    """tool_calls 해소 후 최종 messages 반환. function-calling 미지원 시 패스스루."""
-    if not config.MCP_ENABLED:
-        return messages
-    tools = await mcp_client.list_tools()
+async def _tool_loop(messages: list[dict], tools: list[dict]) -> list[dict]:
+    """tool_calls 해소 후 최종 messages 반환. tools 비어있으면 패스스루."""
     if not tools:
         return messages
     for _ in range(config.MCP_MAX_TOOL_ITERATIONS):
@@ -69,12 +86,11 @@ async def _tool_loop(messages: list[dict]) -> list[dict]:
             return messages
         messages.append({"role": "assistant", "tool_calls": tool_calls, "content": msg.get("content") or ""})
         for tc in tool_calls:
-            import json as _json
             fn = tc.get("function", {})
             name = fn.get("name", "")
             args_raw = fn.get("arguments", "{}")
             try:
-                args = _json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
             except Exception:
                 args = {}
             result = await mcp_client.call_tool(name, args)
@@ -84,6 +100,14 @@ async def _tool_loop(messages: list[dict]) -> list[dict]:
             })
     return messages
 
+async def _emit_text_only(msg: str, msg_id: str):
+    """LLM 스킵 시 text_chunk + text_done + emotion + TTS."""
+    await _send({"type": "text_chunk", "content": msg, "is_final": False, "message_id": msg_id})
+    await _send({"type": "text_done", "message_id": msg_id, "full_content": msg})
+    emotion, intensity = persona.classify_emotion(msg)
+    await _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity})
+    await _dispatch_tts(msg, msg_id)
+
 async def handle_message(content: str, session_id: str, event_type: str = "text"):
     msg_id = str(uuid.uuid4())[:8]
 
@@ -91,16 +115,20 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     ctx.touch()
 
     system_prompt = persona.build_system_prompt(ctx.get())
-    recent = await history.get_recent(session_id, limit=config.HISTORY_ROLLING_TURNS)
-    summary = await history.get_latest_summary(session_id)
+
+    recent, summary, tools = await asyncio.gather(
+        history.get_recent(session_id, limit=config.HISTORY_ROLLING_TURNS),
+        history.get_latest_summary(session_id),
+        mcp_client.list_tools() if config.MCP_ENABLED else _noop_list(),
+    )
+
     messages = [{"role": "system", "content": system_prompt}]
     if summary:
         messages.append({"role": "system", "content": f"이전 대화 요약: {summary}"})
     messages.extend(recent)
 
-    from services import vision
     messages = vision.prepare(messages)
-    messages = await _tool_loop(messages)
+    messages = await _tool_loop(messages, tools)
 
     await _send({"type": "avatar_emotion", "emotion": "thinking", "intensity": 0.7})
 
@@ -125,7 +153,10 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     emotion, intensity = persona.classify_emotion(full_text)
     await _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity})
     await asyncio.gather(*tts_tasks, return_exceptions=True)
-    asyncio.create_task(_maybe_summarize(session_id))
+    _track(_maybe_summarize(session_id))
+
+async def _noop_list() -> list:
+    return []
 
 async def _dispatch_tts(text: str, msg_id: str):
     if not text:
@@ -183,20 +214,10 @@ async def handle_claude_hook(hook_type: str, payload: dict, session_id: str):
 
 async def handle_templated(template_key: str, session_id: str, context: dict = None):
     """LLM 스킵, 템플릿에서 랜덤 선택 → TTS 직송."""
-    import json as _json
-    import random as _random
-    try:
-        with open(config.PROACTIVE_TEMPLATES_PATH, encoding="utf-8") as f:
-            templates = _json.load(f)
-    except Exception:
-        return
+    templates = _load_templates()
     pool = templates.get(template_key, [])
     if not pool:
         return
-    msg = _random.choice(pool).format(**(context or {}))
+    msg = random.choice(pool).format(**(context or {}))
     await history.save_message(session_id, "assistant", msg, f"proactive_{template_key}")
-    await _send({"type": "text_chunk", "content": msg, "is_final": False, "message_id": "tpl"})
-    await _send({"type": "text_done", "message_id": "tpl", "full_content": msg})
-    emotion, intensity = persona.classify_emotion(msg)
-    await _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity})
-    await _dispatch_tts(msg, "tpl")
+    await _emit_text_only(msg, "tpl")

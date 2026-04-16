@@ -1,4 +1,5 @@
 import time
+import config
 
 _state = {
     "cwd": "",
@@ -7,6 +8,8 @@ _state = {
     "claude_task": "",
     "last_activity": time.time(),
 }
+
+_screenshot: dict = {"data": None, "ts": 0.0}
 
 def touch():
     """활동 발생 시 호출, last_activity만 갱신."""
@@ -24,19 +27,14 @@ def get() -> dict:
 def idle_seconds() -> float:
     return time.time() - _state["last_activity"]
 
-import time as _time_mod
-
-_screenshot: dict = {"data": None, "ts": 0.0}
-
 def set_screenshot(data: bytes):
     _screenshot["data"] = data
-    _screenshot["ts"] = _time_mod.time()
+    _screenshot["ts"] = time.time()
 
 def get_screenshot() -> bytes | None:
-    import config
     if _screenshot["data"] is None:
         return None
-    if _time_mod.time() - _screenshot["ts"] > config.SCREENSHOT_TTL_SECONDS:
+    if time.time() - _screenshot["ts"] > config.SCREENSHOT_TTL_SECONDS:
         _screenshot["data"] = None
         return None
     return _screenshot["data"]

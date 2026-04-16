@@ -7,6 +7,19 @@ def test_sentence_flush():
 
 def test_code_block_skip():
     c = SentenceChunker()
-    results = c.feed("설명: ```python\nprint(1)\n``` 끝.")
-    # 코드블록 내부는 플러시 안됨
-    # 코드블록 밖 "끝." 은 플러시되지만 startswith("```") 가드로 드롭될 수 있음
+    inside = c.feed("설명: ```python\nprint(1)\n``` 끝.")
+    tail = c.finalize()
+    flushed = inside + ([tail] if tail else [])
+    assert not any("print(1)" in s for s in flushed)
+    assert any("끝" in s for s in flushed)
+
+def test_max_chunk_chars_flush():
+    c = SentenceChunker()
+    long_text = "가" * 250
+    out = c.feed(long_text)
+    assert out, "200자 상한 도달 시 flush 되어야 함"
+
+def test_finalize_drops_unterminated_code_block():
+    c = SentenceChunker()
+    c.feed("코드: ```python\nprint(1)")
+    assert c.finalize() is None

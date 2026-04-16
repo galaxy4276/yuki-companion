@@ -121,7 +121,6 @@ let ws, config
 let session = 'default'
 let isRecording = false, mediaRecorder, audioChunks = []
 let currentMsgEl = null
-let muted = false
 
 async function init() {
   config = await window.yukiAPI.getConfig()
@@ -280,21 +279,6 @@ async function stopRec() {
   const buf = await blob.arrayBuffer()
   const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
   send({ type: 'audio_chunk', data: b64, is_final: true })
-}
-
-// ─── 오디오 재생 ─────────────────────────────────────────────────
-let audioCtx = null
-async function playAudio(b64) {
-  if (muted) return
-  if (!audioCtx) audioCtx = new AudioContext()
-  const raw = atob(b64)
-  const buf = new Uint8Array(raw.length)
-  for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i)
-  const decoded = await audioCtx.decodeAudioData(buf.buffer)
-  const src = audioCtx.createBufferSource()
-  src.buffer = decoded
-  src.connect(audioCtx.destination)
-  src.start()
 }
 
 document.getElementById('close-btn').onclick = () => window.yukiAPI.hideChat()

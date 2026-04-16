@@ -4,7 +4,9 @@ import base64
 from fastapi import WebSocket, WebSocketDisconnect
 
 import core.orchestrator as orchestrator
+from core import context
 import services.stt as stt
+from core.logging import logger
 
 _connections: set[WebSocket] = set()
 _audio_buffers: dict[str, list[bytes]] = {}
@@ -19,7 +21,7 @@ def _track(coro) -> asyncio.Task:
 
 def _log_exc(task: asyncio.Task):
     if not task.cancelled() and task.exception():
-        print(f"[WS] 태스크 오류: {task.exception()}")
+        logger.error(f"[WS] 태스크 오류: {task.exception()}")
 
 async def broadcast(payload: dict):
     if not _connections:
@@ -80,12 +82,10 @@ async def handle_ws(websocket: WebSocket):
                 ))
 
             elif msg_type == "screen_capture":
-                import base64 as _b64
-                from core import context as _ctx
                 try:
-                    _ctx.set_screenshot(_b64.b64decode(data["data"]))
-                except Exception:
-                    pass
+                    context.set_screenshot(base64.b64decode(data["data"]))
+                except Exception as e:
+                    logger.warning(f"[WS] screen_capture decode 실패: {e}")
 
     except WebSocketDisconnect:
         _connections.discard(websocket)

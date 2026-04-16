@@ -2,18 +2,19 @@ import shutil
 import subprocess
 import numpy as np
 import config
+from core.logging import logger
 
 _model = None
 
 def load_whisper():
     global _model
     if not shutil.which("ffmpeg"):
-        print("[STT] WARNING: ffmpeg 미설치. webm 디코딩 실패 예상")
+        logger.warning("[STT] ffmpeg 미설치. webm 디코딩 실패 예상")
     from faster_whisper import WhisperModel
     _model = WhisperModel(
         config.WHISPER_MODEL, device=config.WHISPER_DEVICE, compute_type=config.WHISPER_COMPUTE,
     )
-    print(f"[STT] Whisper {config.WHISPER_MODEL} 로드 완료 ({config.WHISPER_DEVICE})")
+    logger.info(f"[STT] Whisper {config.WHISPER_MODEL} 로드 완료 ({config.WHISPER_DEVICE})")
 
 def _decode_to_pcm(audio_bytes: bytes) -> np.ndarray | None:
     try:
@@ -22,11 +23,11 @@ def _decode_to_pcm(audio_bytes: bytes) -> np.ndarray | None:
             input=audio_bytes, capture_output=True, timeout=15,
         )
         if proc.returncode != 0:
-            print(f"[STT] ffmpeg 실패: {proc.stderr.decode()[:200]}")
+            logger.warning(f"[STT] ffmpeg 실패: {proc.stderr.decode()[:200]}")
             return None
         return np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32) / 32768.0
     except Exception as e:
-        print(f"[STT] 디코드 오류: {e}")
+        logger.warning(f"[STT] 디코드 오류: {e}")
         return None
 
 def transcribe(audio_bytes: bytes) -> str:

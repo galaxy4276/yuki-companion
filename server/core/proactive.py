@@ -4,16 +4,21 @@ import time
 import config
 import core.context as ctx
 import core.orchestrator as orchestrator
+from core.logging import logger
 
 DEFAULT_SESSION = "default"
+_last_idle_trigger = 0.0
 _last_night_trigger = 0.0
 
-async def _send_proactive(msg: str):
-    await orchestrator.handle_message(msg, DEFAULT_SESSION, event_type="proactive")
-
 async def _check_idle():
-    if ctx.idle_seconds() >= config.IDLE_TRIGGER_MINUTES * 60:
-        await orchestrator.handle_templated("idle", DEFAULT_SESSION)
+    global _last_idle_trigger
+    if ctx.idle_seconds() < config.IDLE_TRIGGER_MINUTES * 60:
+        return
+    now = time.time()
+    if now - _last_idle_trigger < config.IDLE_TRIGGER_MINUTES * 60:
+        return
+    _last_idle_trigger = now
+    await orchestrator.handle_templated("idle", DEFAULT_SESSION)
 
 async def _check_night():
     global _last_night_trigger
@@ -33,4 +38,4 @@ async def run():
             await _check_idle()
             await _check_night()
         except Exception as e:
-            print(f"[Proactive] 오류: {e}")
+            logger.warning(f"[Proactive] 오류: {e}")

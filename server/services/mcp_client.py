@@ -6,6 +6,7 @@ from core.logging import logger
 _client = httpx.AsyncClient(timeout=config.MCP_TOOL_TIMEOUT_SECONDS)
 _tool_cache = {"ts": 0.0, "tools": None}
 _req_id = 0
+_initialized = False
 
 def _next_id() -> int:
     global _req_id
@@ -31,16 +32,19 @@ async def _rpc(method: str, params: dict | None = None) -> dict:
 
 async def list_tools(force: bool = False) -> list[dict]:
     """OpenAI function-calling 스키마로 변환된 tool 리스트."""
+    global _initialized
     if not config.MCP_ENABLED:
         return []
     if not force and _tool_cache["tools"] and time.time() - _tool_cache["ts"] < config.MCP_TOOL_LIST_TTL_SECONDS:
         return _tool_cache["tools"]
     try:
-        await _rpc("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "yuki-companion", "version": "1.0.0"},
-        })
+        if not _initialized:
+            await _rpc("initialize", {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "yuki-companion", "version": "1.0.0"},
+            })
+            _initialized = True
         result = await _rpc("tools/list")
         raw = result.get("tools", [])
         filtered = [t for t in raw if t["name"] in config.MCP_TOOL_ALLOWLIST]
