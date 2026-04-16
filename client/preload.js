@@ -19,4 +19,7 @@ contextBridge.exposeInMainWorld('yukiAPI', {
 
   // 채팅 창 → 메인으로 오디오 중계
   relayAudio: (b64) => ipcRenderer.send('play-audio', b64),
+  showSpeechBubble: (text) => ipcRenderer.send('show-speech-bubble', text),
+  hideChat: () => ipcRenderer.send('hide-chat'),
+  onError: (fn) => ipcRenderer.on('error', (_, payload) => fn(payload)),
 })

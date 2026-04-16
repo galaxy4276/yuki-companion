@@ -34,7 +34,7 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     msg_id = str(uuid.uuid4())[:8]
 
     await history.save_message(session_id, "user", content, event_type)
-    ctx.update("last_activity", 0)  # last_activity를 현재 시각으로 갱신
+    ctx.touch()  # last_activity를 현재 시각으로 갱신
 
     system_prompt = persona.build_system_prompt(ctx.get())
     recent = await history.get_recent(session_id, limit=10)
