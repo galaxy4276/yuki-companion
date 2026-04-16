@@ -110,7 +110,7 @@ Free models: [VRoid Hub](https://hub.vroid.com)
 Add to `~/.zshrc` to let Yuki react to your terminal:
 
 ```zsh
-source /path/to/yuki-companion/client/hooks/terminal_hook.sh
+source /path/to/yuki-companion/server/hooks/terminal_hook.sh
 ```
 
 ## Claude Code Hook

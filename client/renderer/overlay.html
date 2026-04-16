@@ -267,6 +267,23 @@ async function playAudio(b64) {
 window.yukiAPI.onSpeechBubble(showBubble)
 window.yukiAPI.onPlayAudio(playAudio)
 
+// ─── 감정 → VRM expression 매핑 ─────────────────────────────────
+const EMOTION_VRM = {
+  happy: 'happy', worried: 'sad', thinking: 'relaxed',
+  surprised: 'surprised', idle: 'neutral',
+}
+function applyEmotion(emotion, intensity) {
+  if (!currentVrm?.expressionManager) return
+  for (const k of Object.values(EMOTION_VRM)) {
+    currentVrm.expressionManager.setValue(k, 0)
+  }
+  const target = EMOTION_VRM[emotion] || 'neutral'
+  if (target !== 'neutral') {
+    currentVrm.expressionManager.setValue(target, intensity || 0.7)
+  }
+}
+window.yukiAPI.onAvatarEmotion(({emotion, intensity}) => applyEmotion(emotion, intensity))
+
 // ─── 컨트롤 버튼 ─────────────────────────────────────────────────
 document.getElementById('btn-chat').addEventListener('click', () => window.yukiAPI.toggleChat())
 document.getElementById('btn-mute').addEventListener('click', (e) => {
