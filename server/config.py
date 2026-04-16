@@ -4,7 +4,7 @@ import os
 GEMMA_BASE_URL = "http://localhost:8001/v1"
 GEMMA_API_KEY  = "w7PhLd603vZQ8Om-Ys7wHeK6CZyzK4ngp1lwsYh2oyQ"
 GEMMA_MODEL    = "gemma-4"
-GEMMA_MAX_TOKENS = 512
+GEMMA_MAX_TOKENS = 2048
 
 # TTS
 TTS_URL = "http://localhost:8880"
