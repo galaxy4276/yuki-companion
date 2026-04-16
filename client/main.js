@@ -106,6 +106,10 @@ ipcMain.on('toggle-chat', () => {
 
 ipcMain.on('hide-chat', () => chatWin?.hide())
 
+ipcMain.on('avatar-emotion', (_, payload) => {
+  mainWin?.webContents.send('avatar-emotion', payload)
+})
+
 ipcMain.handle('get-config', () => ({ WS_URL, SERVER_URL }))
 
 // ─── 앱 시작 ─────────────────────────────────────────────────────

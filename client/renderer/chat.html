@@ -164,6 +164,11 @@ function handle(data) {
       addMsg('user', data.text)
       setTimeout(() => document.getElementById('stt-hint').textContent = '', 3000)
       break
+
+    case 'avatar_emotion':
+      if (window.yukiAPI.emitAvatarEmotion)
+        window.yukiAPI.emitAvatarEmotion(data)
+      break
   }
 }
 

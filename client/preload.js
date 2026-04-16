@@ -22,4 +22,6 @@ contextBridge.exposeInMainWorld('yukiAPI', {
   showSpeechBubble: (text) => ipcRenderer.send('show-speech-bubble', text),
   hideChat: () => ipcRenderer.send('hide-chat'),
   onError: (fn) => ipcRenderer.on('error', (_, payload) => fn(payload)),
+  onAvatarEmotion: (fn) => ipcRenderer.on('avatar-emotion', (_, payload) => fn(payload)),
+  emitAvatarEmotion: (payload) => ipcRenderer.send('avatar-emotion', payload),
 })
