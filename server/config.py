@@ -41,3 +41,7 @@ HISTORY_ROLLING_TURNS = 20
 HISTORY_SUMMARY_ON_OVERFLOW = 10
 
 PROACTIVE_TEMPLATES_PATH = os.path.join(os.path.dirname(__file__), "data", "proactive_templates.json")
+
+SCREENSHOT_TTL_SECONDS = 300
+VISION_MODEL_CAPABLE = False
+OCR_LANGUAGES = "kor+eng"

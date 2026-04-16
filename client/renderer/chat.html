@@ -129,6 +129,13 @@ async function init() {
   window.yukiAPI.onGlobalPttToggle(() => {
     if (isRecording) stopRec(); else startRec()
   })
+  window.yukiAPI.onScreenCaptureTrigger(async () => {
+    const b64 = await window.yukiAPI.captureScreen()
+    if (b64) {
+      send({ type: 'screen_capture', data: b64, timestamp: Date.now() })
+      addMsg('system', '📸 화면 전송')
+    }
+  })
 }
 
 // ─── WebSocket ───────────────────────────────────────────────────

@@ -63,6 +63,9 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
         messages.append({"role": "system", "content": f"이전 대화 요약: {summary}"})
     messages.extend(recent)
 
+    from services import vision
+    messages = vision.prepare(messages)
+
     await _send({"type": "avatar_emotion", "emotion": "thinking", "intensity": 0.7})
 
     full_text = ""
