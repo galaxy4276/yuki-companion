@@ -34,29 +34,35 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     msg_id = str(uuid.uuid4())[:8]
 
     await history.save_message(session_id, "user", content, event_type)
-    ctx.touch()  # last_activity를 현재 시각으로 갱신
+    ctx.touch()
 
     system_prompt = persona.build_system_prompt(ctx.get())
-    recent = await history.get_recent(session_id, limit=10)
+    recent = await history.get_recent(session_id, limit=20)
     messages = [{"role": "system", "content": system_prompt}] + recent
 
     await _send({"type": "avatar_emotion", "emotion": "thinking", "intensity": 0.7})
 
     full_text = ""
+    chunker = tts.SentenceChunker()
+    tts_tasks: list[asyncio.Task] = []
+
     async for chunk, is_final in llm.stream_response(messages):
         if not is_final:
             full_text += chunk
             await _send({"type": "text_chunk", "content": chunk, "is_final": False, "message_id": msg_id})
+            for sentence in chunker.feed(chunk):
+                tts_tasks.append(_track(_dispatch_tts(sentence, msg_id)))
         else:
             await _send({"type": "text_done", "message_id": msg_id, "full_content": full_text})
 
-    await history.save_message(session_id, "assistant", full_text, event_type)
+    tail = chunker.finalize()
+    if tail:
+        tts_tasks.append(_track(_dispatch_tts(tail, msg_id)))
 
+    await history.save_message(session_id, "assistant", full_text, event_type)
     emotion, intensity = persona.classify_emotion(full_text)
-    await asyncio.gather(
-        _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity}),
-        _dispatch_tts(full_text, msg_id),
-    )
+    await _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity})
+    await asyncio.gather(*tts_tasks, return_exceptions=True)
 
 async def _dispatch_tts(text: str, msg_id: str):
     if not text:
