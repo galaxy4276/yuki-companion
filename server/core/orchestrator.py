@@ -1,7 +1,9 @@
 import asyncio
+import time
 import uuid
 from typing import Callable, Awaitable
 
+import config
 import db.history as history
 import services.llm as llm
 import services.tts as tts
@@ -81,7 +83,29 @@ async def handle_terminal_event(command: str, exit_code: int, duration_ms: int, 
         msg = f"터미널에서 '{command}' 명령이 실패했어 (exit {exit_code}). 에러 확인해줄까?"
         await handle_message(msg, session_id, event_type="terminal")
 
+_last_posttool_ts = 0.0
+
+async def _on_stop(payload: dict, session_id: str):
+    await handle_message("Claude Code 작업이 끝났어! 뭘 만들었는지 궁금한데?", session_id, event_type="claude_hook")
+
+async def _on_post_tool_use(payload: dict, session_id: str):
+    global _last_posttool_ts
+    tool_name = payload.get("tool_name", "")
+    if tool_name not in config.CLAUDE_POSTTOOL_TOOLS:
+        return
+    now = time.time()
+    if now - _last_posttool_ts < config.CLAUDE_POSTTOOL_DEBOUNCE_SECONDS:
+        return
+    _last_posttool_ts = now
+    await handle_message(f"{tool_name} 썼네. 뭐 고쳤어?", session_id, event_type="claude_hook")
+
+CLAUDE_HOOK_HANDLERS = {
+    "Stop": _on_stop,
+    "PostToolUse": _on_post_tool_use,
+}
+
 async def handle_claude_hook(hook_type: str, payload: dict, session_id: str):
     ctx.update("claude_task", hook_type)
-    if hook_type == "Stop":
-        await handle_message("Claude Code 작업이 끝났어! 뭘 만들었는지 궁금한데?", session_id, event_type="claude_hook")
+    handler = CLAUDE_HOOK_HANDLERS.get(hook_type)
+    if handler:
+        await handler(payload, session_id)
