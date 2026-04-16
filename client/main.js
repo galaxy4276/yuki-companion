@@ -106,6 +106,8 @@ ipcMain.on('toggle-chat', () => {
   chatWin?.isVisible() ? chatWin?.hide() : chatWin?.show()
 })
 
+ipcMain.on('hide-chat', () => chatWin?.hide())
+
 ipcMain.handle('get-config', () => ({ WS_URL, SERVER_URL }))
 
 // ─── 앱 시작 ─────────────────────────────────────────────────────
