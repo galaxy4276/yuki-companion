@@ -45,3 +45,16 @@ PROACTIVE_TEMPLATES_PATH = os.path.join(os.path.dirname(__file__), "data", "proa
 SCREENSHOT_TTL_SECONDS = 300
 VISION_MODEL_CAPABLE = False
 OCR_LANGUAGES = "kor+eng"
+
+# sometime-central MCP는 이미 macmini.tail6899df.ts.net(Tailscale)에 배포됨.
+# 공개 HTTPS 경로 기본 사용. Tailscale 참여 시 ts.net 호스트 가능.
+MCP_BASE_URL = os.environ.get("MCP_BASE_URL", "https://mcp.sometime-central.com/mcp")
+MCP_BEARER_TOKEN = os.environ.get("MCP_BEARER_TOKEN", "")
+MCP_TOOL_ALLOWLIST = [
+    "ask-sometime", "search-knowledge", "health",
+    "get-metric", "get-revenue", "get-gem-stats",
+]
+MCP_TOOL_LIST_TTL_SECONDS = 60
+MCP_MAX_TOOL_ITERATIONS = 5
+MCP_TOOL_TIMEOUT_SECONDS = 30
+MCP_ENABLED = bool(MCP_BEARER_TOKEN)
