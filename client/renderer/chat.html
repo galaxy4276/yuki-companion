@@ -118,6 +118,9 @@ let muted = false
 async function init() {
   config = await window.yukiAPI.getConfig()
   connect()
+  window.yukiAPI.onGlobalPttToggle(() => {
+    if (isRecording) stopRec(); else startRec()
+  })
 }
 
 // ─── WebSocket ───────────────────────────────────────────────────
