@@ -147,8 +147,8 @@ function handle(data) {
       if (!currentMsgEl) currentMsgEl = addMsg('assistant', '')
       currentMsgEl.textContent += data.content
       scrollBottom()
-      // 오버레이 말풍선 업데이트
-      window.yukiAPI.relayAudio  // 텍스트는 IPC 없이 자체 표시
+      if (window.yukiAPI.showSpeechBubble)
+        window.yukiAPI.showSpeechBubble(currentMsgEl.textContent)
       break
 
     case 'text_done':
@@ -156,8 +156,7 @@ function handle(data) {
       break
 
     case 'audio_response':
-      playAudio(data.data)
-      window.yukiAPI.relayAudio(data.data)  // 오버레이에도 전달
+      window.yukiAPI.relayAudio(data.data)
       break
 
     case 'stt_result':
