@@ -75,9 +75,7 @@ function createChatWindow() {
 
 // ─── 트레이 아이콘 ───────────────────────────────────────────────
 function createTray() {
-  const icon = nativeImage.createFromDataURL(
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAA7EAAAOxAGVKw4bAAAA'
-  )
+  const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'tray.png'))
   tray = new Tray(icon)
   tray.setToolTip('유키 AI 동반자')
   tray.setContextMenu(Menu.buildFromTemplate([
