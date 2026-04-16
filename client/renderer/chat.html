@@ -204,18 +204,44 @@ const pttBtn = document.getElementById('ptt-btn')
 pttBtn.addEventListener('mousedown', startRec)
 pttBtn.addEventListener('mouseup', stopRec)
 
+let vadStream, vadCtx, vadAnalyser, vadRaf, vadStartTime = 0
 async function startRec() {
   if (isRecording) return
-  isRecording = true; audioChunks = []
+  isRecording = true; audioChunks = []; vadStartTime = Date.now()
   pttBtn.classList.add('recording'); pttBtn.textContent = '⏹'
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-  mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+  vadStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  mediaRecorder = new MediaRecorder(vadStream, { mimeType: 'audio/webm' })
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data) }
   mediaRecorder.start(200)
+
+  vadCtx = new AudioContext()
+  const src = vadCtx.createMediaStreamSource(vadStream)
+  vadAnalyser = vadCtx.createAnalyser()
+  vadAnalyser.fftSize = 512
+  src.connect(vadAnalyser)
+  const data = new Uint8Array(vadAnalyser.fftSize)
+  let silenceStart = 0
+  const loop = () => {
+    if (!isRecording) return
+    vadAnalyser.getByteTimeDomainData(data)
+    let sum = 0
+    for (let i = 0; i < data.length; i++) { const v = (data[i]-128)/128; sum += v*v }
+    const rms = Math.sqrt(sum / data.length)
+    const now = Date.now()
+    if (rms < 0.02) {
+      if (silenceStart === 0) silenceStart = now
+      if (now - silenceStart > 800 && now - vadStartTime > 500) { stopRec(); return }
+    } else { silenceStart = 0 }
+    vadRaf = requestAnimationFrame(loop)
+  }
+  loop()
 }
+
 async function stopRec() {
   if (!isRecording) return
   isRecording = false
+  if (vadRaf) cancelAnimationFrame(vadRaf)
+  try { vadCtx?.close() } catch {}
   pttBtn.classList.remove('recording'); pttBtn.textContent = '🎤'
   mediaRecorder.stop()
   mediaRecorder.stream.getTracks().forEach(t => t.stop())
