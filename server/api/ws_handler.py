@@ -32,7 +32,7 @@ async def broadcast(payload: dict):
         return_exceptions=True,
     )
     dead = {ws for ws, r in zip(list(_connections), results) if isinstance(r, Exception)}
-    _connections -= dead
+    _connections.difference_update(dead)
 
 orchestrator.set_broadcaster(broadcast)
 
