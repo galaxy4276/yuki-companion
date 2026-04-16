@@ -39,3 +39,12 @@ async def complete_once(messages: list[dict]) -> str:
         model=config.GEMMA_MODEL, messages=messages, max_tokens=config.GEMMA_MAX_TOKENS,
     )
     return resp.choices[0].message.content or ""
+
+async def complete_with_tools(messages: list[dict], tools: list[dict]) -> dict:
+    """tool_calls 응답 판별용 non-stream 호출. 결과 message dict 리턴."""
+    client = get_client()
+    resp = await client.chat.completions.create(
+        model=config.GEMMA_MODEL, messages=messages,
+        max_tokens=config.GEMMA_MAX_TOKENS, tools=tools, tool_choice="auto",
+    )
+    return resp.choices[0].message.model_dump()
