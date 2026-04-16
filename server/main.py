@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 from db.database import init_db
-from services.persona import load_persona
+from services import persona
 from services.stt import load_whisper
 from api.ws_handler import handle_ws
 from api.hooks import router as hooks_router
@@ -16,9 +16,10 @@ from core.logging import logger
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    load_persona()
+    persona.load_persona()
     load_whisper()
     asyncio.create_task(proactive.run())
+    asyncio.create_task(persona.watch_persona())
     logger.info(f"기동 완료 — http://{config.HOST}:{config.PORT}")
     yield
 
