@@ -1,6 +1,7 @@
 import asyncio
 import time
 import uuid
+from collections import deque
 from typing import Callable, Awaitable
 
 import config
@@ -12,6 +13,7 @@ import core.context as ctx
 
 _broadcaster: Callable[[dict], Awaitable[None]] | None = None
 _tasks: set[asyncio.Task] = set()
+_recent_cmds: deque = deque(maxlen=config.RECENT_CMD_RING_SIZE)
 
 def set_broadcaster(fn: Callable[[dict], Awaitable[None]]):
     global _broadcaster
@@ -79,8 +81,16 @@ async def handle_terminal_event(command: str, exit_code: int, duration_ms: int, 
     ctx.update("last_exit_code", exit_code)
     await history.save_terminal_event(command, exit_code, duration_ms, cwd)
 
+    _recent_cmds.append((command, exit_code))
+
     if exit_code != 0:
-        msg = f"터미널에서 '{command}' 명령이 실패했어 (exit {exit_code}). 에러 확인해줄까?"
+        recent_fails = [c for c, e in list(_recent_cmds)[-config.REPEAT_FAIL_THRESHOLD:]
+                        if c == command and e != 0]
+        if len(recent_fails) >= config.REPEAT_FAIL_THRESHOLD:
+            msg = f"'{command}' 계속 실패하고 있네. 다른 방법 시도해볼까?"
+            _recent_cmds.clear()
+        else:
+            msg = f"터미널에서 '{command}' 명령이 실패했어 (exit {exit_code}). 에러 확인해줄까?"
         await handle_message(msg, session_id, event_type="terminal")
 
 _last_posttool_ts = 0.0
