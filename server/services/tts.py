@@ -14,7 +14,7 @@ async def synthesize(text: str) -> bytes | None:
     try:
         resp = await _client.post(
             f"{config.TTS_URL}/v1/audio/speech",
-            json={"input": text, "voice": "Sohee", "response_format": "wav"},
+            json={"input": text, "voice": config.TTS_VOICE, "response_format": "wav"},
         )
         if resp.status_code == 200:
             return resp.content
