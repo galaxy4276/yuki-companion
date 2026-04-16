@@ -34,6 +34,21 @@ def _log_exc(task: asyncio.Task):
     if not task.cancelled() and task.exception():
         print(f"[Orchestrator] 태스크 오류: {task.exception()}")
 
+async def _maybe_summarize(session_id: str):
+    total = await history.count_turns(session_id)
+    if total <= config.HISTORY_ROLLING_TURNS:
+        return
+    to_summarize = await history.get_turns_range(session_id, 0, config.HISTORY_SUMMARY_ON_OVERFLOW)
+    if not to_summarize:
+        return
+    transcript = "\n".join(f"{t['role']}: {t['content']}" for t in to_summarize)
+    prompt = [
+        {"role": "system", "content": "아래 대화를 3~5문장으로 한국어 요약해."},
+        {"role": "user", "content": transcript},
+    ]
+    summary = await llm.complete_once(prompt)
+    await history.save_summary(session_id, summary, f"0-{config.HISTORY_SUMMARY_ON_OVERFLOW}")
+
 async def handle_message(content: str, session_id: str, event_type: str = "text"):
     msg_id = str(uuid.uuid4())[:8]
 
@@ -41,8 +56,12 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     ctx.touch()
 
     system_prompt = persona.build_system_prompt(ctx.get())
-    recent = await history.get_recent(session_id, limit=20)
-    messages = [{"role": "system", "content": system_prompt}] + recent
+    recent = await history.get_recent(session_id, limit=config.HISTORY_ROLLING_TURNS)
+    summary = await history.get_latest_summary(session_id)
+    messages = [{"role": "system", "content": system_prompt}]
+    if summary:
+        messages.append({"role": "system", "content": f"이전 대화 요약: {summary}"})
+    messages.extend(recent)
 
     await _send({"type": "avatar_emotion", "emotion": "thinking", "intensity": 0.7})
 
@@ -67,6 +86,7 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     emotion, intensity = persona.classify_emotion(full_text)
     await _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity})
     await asyncio.gather(*tts_tasks, return_exceptions=True)
+    asyncio.create_task(_maybe_summarize(session_id))
 
 async def _dispatch_tts(text: str, msg_id: str):
     if not text:
