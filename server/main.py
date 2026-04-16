@@ -11,6 +11,7 @@ from services.stt import load_whisper
 from api.ws_handler import handle_ws
 from api.hooks import router as hooks_router
 import core.proactive as proactive
+from core.logging import logger
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,7 +19,7 @@ async def lifespan(app: FastAPI):
     load_persona()
     load_whisper()
     asyncio.create_task(proactive.run())
-    print(f"[Orchestrator] 기동 완료 — http://{config.HOST}:{config.PORT}")
+    logger.info(f"기동 완료 — http://{config.HOST}:{config.PORT}")
     yield
 
 app = FastAPI(title="VTuber Companion Orchestrator", lifespan=lifespan)
@@ -36,7 +37,8 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    from services.health import check
+    return await check()
 
 if __name__ == "__main__":
     import uvicorn
