@@ -9,7 +9,9 @@ import db.history as history
 import services.llm as llm
 import services.tts as tts
 import services.persona as persona
+from services import mcp_client
 import core.context as ctx
+from core.logging import logger
 
 _broadcaster: Callable[[dict], Awaitable[None]] | None = None
 _tasks: set[asyncio.Task] = set()
@@ -49,6 +51,39 @@ async def _maybe_summarize(session_id: str):
     summary = await llm.complete_once(prompt)
     await history.save_summary(session_id, summary, f"0-{config.HISTORY_SUMMARY_ON_OVERFLOW}")
 
+async def _tool_loop(messages: list[dict]) -> list[dict]:
+    """tool_calls 해소 후 최종 messages 반환. function-calling 미지원 시 패스스루."""
+    if not config.MCP_ENABLED:
+        return messages
+    tools = await mcp_client.list_tools()
+    if not tools:
+        return messages
+    for _ in range(config.MCP_MAX_TOOL_ITERATIONS):
+        try:
+            msg = await llm.complete_with_tools(messages, tools)
+        except Exception as e:
+            logger.warning(f"[ToolLoop] LLM 호출 실패: {e}")
+            return messages
+        tool_calls = msg.get("tool_calls") or []
+        if not tool_calls:
+            return messages
+        messages.append({"role": "assistant", "tool_calls": tool_calls, "content": msg.get("content") or ""})
+        for tc in tool_calls:
+            import json as _json
+            fn = tc.get("function", {})
+            name = fn.get("name", "")
+            args_raw = fn.get("arguments", "{}")
+            try:
+                args = _json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+            except Exception:
+                args = {}
+            result = await mcp_client.call_tool(name, args)
+            messages.append({
+                "role": "tool", "tool_call_id": tc.get("id", ""),
+                "name": name, "content": result,
+            })
+    return messages
+
 async def handle_message(content: str, session_id: str, event_type: str = "text"):
     msg_id = str(uuid.uuid4())[:8]
 
@@ -65,6 +100,7 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
 
     from services import vision
     messages = vision.prepare(messages)
+    messages = await _tool_loop(messages)
 
     await _send({"type": "avatar_emotion", "emotion": "thinking", "intensity": 0.7})
 

@@ -11,6 +11,8 @@ ExecStart=/usr/bin/python3 main.py
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+Environment=MCP_BASE_URL=https://mcp.sometime-central.com/mcp
+Environment=MCP_BEARER_TOKEN=CHANGE_ME_FROM_MACMINI_SECRETS
 
 [Install]
 WantedBy=multi-user.target
