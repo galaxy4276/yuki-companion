@@ -5,7 +5,12 @@ from core.logging import logger
 from core import events
 from core.events import since_ms
 
-_client = httpx.AsyncClient(timeout=config.MCP_TOOL_TIMEOUT_SECONDS)
+_MAX_TIMEOUT = max([config.MCP_TOOL_TIMEOUT_SECONDS, *config.MCP_TOOL_TIMEOUTS.values()])
+_client = httpx.AsyncClient(timeout=_MAX_TIMEOUT)
+
+
+def _timeout_for(tool_name: str) -> float:
+    return float(config.MCP_TOOL_TIMEOUTS.get(tool_name, config.MCP_TOOL_TIMEOUT_SECONDS))
 _tool_cache = {"ts": 0.0, "tools": None}
 _req_id = 0
 _initialized = False
@@ -31,11 +36,14 @@ def _parse_response(text: str, content_type: str) -> dict:
     import json
     return json.loads(text)
 
-async def _rpc(method: str, params: dict | None = None) -> dict:
+async def _rpc(method: str, params: dict | None = None, timeout: float | None = None) -> dict:
     body = {"jsonrpc": "2.0", "id": _next_id(), "method": method}
     if params is not None:
         body["params"] = params
-    r = await _client.post(config.MCP_BASE_URL, json=body, headers=_headers())
+    kwargs = {"json": body, "headers": _headers()}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    r = await _client.post(config.MCP_BASE_URL, **kwargs)
     r.raise_for_status()
     data = _parse_response(r.text, r.headers.get("content-type", ""))
     if "error" in data:
@@ -87,10 +95,11 @@ def _err_repr(e: Exception) -> str:
 async def call_tool(name: str, args: dict) -> str:
     if name not in config.MCP_TOOL_ALLOWLIST:
         return f"Tool '{name}' not in allowlist"
+    timeout = _timeout_for(name)
     t0 = time.time()
-    await events.emit("mcp.call", {"name": name, "args": args})
+    await events.emit("mcp.call", {"name": name, "args": args, "timeout_s": timeout})
     try:
-        result = await _rpc("tools/call", {"name": name, "arguments": args})
+        result = await _rpc("tools/call", {"name": name, "arguments": args}, timeout=timeout)
         contents = result.get("content", [])
         texts = [c.get("text", "") for c in contents if c.get("type") == "text"]
         text_result = "\n".join(texts) or str(result)
@@ -100,6 +109,6 @@ async def call_tool(name: str, args: dict) -> str:
         return text_result
     except Exception as e:
         reason = _err_repr(e)
-        logger.warning(f"[MCP] call_tool({name}) 실패: {reason}")
-        await events.emit("mcp.fail", {"name": name, "reason": reason, "duration_ms": since_ms(t0)})
+        logger.warning(f"[MCP] call_tool({name}) 실패 (timeout={timeout}s): {reason}")
+        await events.emit("mcp.fail", {"name": name, "reason": reason, "duration_ms": since_ms(t0), "timeout_s": timeout})
         return f"[MCP 오류: {reason}]"

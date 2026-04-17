@@ -69,5 +69,17 @@ MCP_TOOL_ALLOWLIST = [
 ]
 MCP_TOOL_LIST_TTL_SECONDS = 60
 MCP_MAX_TOOL_ITERATIONS = 5
-MCP_TOOL_TIMEOUT_SECONDS = 120  # ask_sometime은 macmini → Claude opus 호출, 복잡 분석은 60s 초과
+MCP_TOOL_TIMEOUT_SECONDS = 60  # 도구별 매핑 없을 때 fallback
+MCP_TOOL_TIMEOUTS = {
+    # 빠른 DB/lookup (즉답)
+    "health": 5,
+    "get_fact": 5,
+    "get_metric": 15,
+    "get_revenue": 30,
+    "get_gem_stats": 30,
+    "search_knowledge": 30,
+    # LLM 호출 기반 (macmini Claude opus) — 분석 요청은 길게
+    "ask_sometime": 180,
+    "ask_marketing_mentor": 180,
+}
 MCP_ENABLED = bool(MCP_BEARER_TOKEN)
