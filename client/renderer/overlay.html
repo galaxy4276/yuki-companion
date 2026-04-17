@@ -284,6 +284,9 @@ let currentVrm = null
 let clock      = new THREE.Clock()
 let isTalking  = false
 let talkTimer  = 0
+let tongueBones = []      // 탐지된 tongue 본 리스트
+let tongueRestRot = []    // 원위치 저장
+const MOUTH_VOWELS = ['aa', 'ih', 'ou', 'ee', 'oh']
 
 // ─── 포즈 프리셋 (단위: 도) — 토끼 모델용 ─────────────────────
 // 앞다리 = Arm(humanoid), 뒷다리 = Leg, 귀 = mimi_L/R_01~03, 꼬리 = sita_01~03
@@ -550,6 +553,18 @@ loader.load(
 
       try { applyPoseInstant('idle') } catch (e) { dbg('pose skip: ' + e.message) }
 
+      // tongue 본 자동 탐지 (rabbit VRM은 tongue/Tongue/J_tongue/べろ/舌 패턴)
+      try {
+        const tonguePattern = /tongue|べろ|舌|bero/i
+        vrm.scene.traverse((o) => {
+          if ((o.isBone || o.type === 'Bone') && tonguePattern.test(o.name)) {
+            tongueBones.push(o)
+            tongueRestRot.push([o.rotation.x, o.rotation.y, o.rotation.z])
+          }
+        })
+        dbg('tongue bones: ' + tongueBones.length + (tongueBones.length ? ' (' + tongueBones.map(b=>b.name).join(',') + ')' : ''))
+      } catch (e) { dbg('tongue scan err: ' + e.message) }
+
       // 자동 카메라 프레이밍: 바운딩 박스 계산
       const box = new THREE.Box3().setFromObject(vrm.scene)
       const center = box.getCenter(new THREE.Vector3())
@@ -652,13 +667,41 @@ function animate() {
       currentVrm.expressionManager.setValue('blink', blink)
     }
 
-    // 말하는 입 애니메이션
+    // 말하는 입 애니메이션 + 혓바닥 광란
     if (currentVrm.expressionManager && isTalking) {
       talkTimer += delta
-      const aa = Math.abs(Math.sin(talkTimer * 10)) * 0.6
-      currentVrm.expressionManager.setValue('aa', aa)
+
+      // 입 모양: 모음 5종 고속 순환 (초당 약 7회 전환)
+      const vowelIdx = Math.floor(talkTimer * 7) % MOUTH_VOWELS.length
+      for (let i = 0; i < MOUTH_VOWELS.length; i++) {
+        const weight = (i === vowelIdx) ? 0.65 + Math.abs(Math.sin(talkTimer * 14)) * 0.3 : 0
+        currentVrm.expressionManager.setValue(MOUTH_VOWELS[i], weight)
+      }
+
+      // 혓바닥 본: 있으면 각 축 광란 (좌우 + 상하 + 롤)
+      if (tongueBones.length > 0) {
+        for (let i = 0; i < tongueBones.length; i++) {
+          const b = tongueBones[i]
+          const rest = tongueRestRot[i]
+          const segPhase = i * 0.7
+          // 초당 8~12Hz 고주파수, ±35도 스윙
+          const xAmp = THREE.MathUtils.degToRad(30)
+          const yAmp = THREE.MathUtils.degToRad(40)
+          const zAmp = THREE.MathUtils.degToRad(25)
+          b.rotation.x = rest[0] + Math.sin(talkTimer * 18 + segPhase) * xAmp
+          b.rotation.y = rest[1] + Math.sin(talkTimer * 14 + segPhase + 0.5) * yAmp
+          b.rotation.z = rest[2] + Math.sin(talkTimer * 22 + segPhase + 1.0) * zAmp
+        }
+      }
     } else if (currentVrm.expressionManager) {
-      currentVrm.expressionManager.setValue('aa', 0)
+      for (const v of MOUTH_VOWELS) currentVrm.expressionManager.setValue(v, 0)
+      // 혓바닥 원위치 복귀
+      if (tongueBones.length > 0) {
+        for (let i = 0; i < tongueBones.length; i++) {
+          const rest = tongueRestRot[i]
+          tongueBones[i].rotation.set(rest[0], rest[1], rest[2])
+        }
+      }
     }
 
     currentVrm.update(delta)
