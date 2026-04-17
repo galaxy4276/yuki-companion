@@ -16,10 +16,21 @@ from services import mcp_client
 from services import vision
 import core.context as ctx
 from core.logging import logger
+from core import events
 
 _broadcaster: Callable[[dict], Awaitable[None]] | None = None
 _tasks: set[asyncio.Task] = set()
 _recent_cmds: deque = deque(maxlen=config.RECENT_CMD_RING_SIZE)
+
+_TOOL_TRIGGER_KEYWORDS = (
+    "썸타임", "매출", "revenue", "매칭", "매치", "유저", "가입", "구슬", "gem",
+    "지표", "metric", "dau", "wau", "mau", "kpi", "결제", "환불", "payment",
+    "운영", "cs", "버그", "리포트", "리뷰", "대학", "학교",
+)
+
+def _needs_tools(content: str) -> bool:
+    low = content.lower()
+    return any(k in low for k in _TOOL_TRIGGER_KEYWORDS)
 
 _templates_cache: dict = {"mtime": 0.0, "data": None}
 
@@ -117,12 +128,19 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     await history.save_message(session_id, "user", content, event_type)
     ctx.touch()
 
+    t0 = time.time()
+    try:
+        await events.emit("msg.start", {"content": content, "session_id": session_id, "event_type": event_type, "msg_id": msg_id})
+    except Exception:
+        pass
+
     system_prompt = persona.build_system_prompt(ctx.get())
 
+    want_tools = config.MCP_ENABLED and _needs_tools(content)
     recent, summary, tools = await asyncio.gather(
         history.get_recent(session_id, limit=config.HISTORY_ROLLING_TURNS),
         history.get_latest_summary(session_id),
-        mcp_client.list_tools() if config.MCP_ENABLED else _noop_list(),
+        mcp_client.list_tools() if want_tools else _noop_list(),
     )
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -131,10 +149,15 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     messages.extend(recent)
 
     messages = vision.prepare(messages)
-    messages = await _tool_loop(messages, tools)
+    if want_tools and tools:
+        logger.info(f"[Orchestrator] tool-loop 진입 ({len(tools)}개 tool)")
+        messages = await _tool_loop(messages, tools)
 
     await _send({"type": "avatar_emotion", "emotion": "thinking", "intensity": 0.7})
-    await _send({"type": "avatar_action", "action": "think"})
+    try:
+        await events.emit("msg.emotion", {"emotion": "thinking", "intensity": 0.7})
+    except Exception:
+        pass
 
     full_text = ""
     chunker = tts.SentenceChunker()
@@ -148,6 +171,10 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
             if not action_sent and stripper.action:
                 action_sent = True
                 await _send({"type": "avatar_action", "action": stripper.action})
+                try:
+                    await events.emit("msg.action", {"action": stripper.action})
+                except Exception:
+                    pass
             if cleaned:
                 full_text += cleaned
                 await _send({"type": "text_chunk", "content": cleaned, "is_final": False, "message_id": msg_id})
@@ -160,6 +187,10 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
                 await _send({"type": "text_chunk", "content": leftover, "is_final": False, "message_id": msg_id})
                 for sentence in chunker.feed(leftover):
                     tts_tasks.append(_track(_dispatch_tts(sentence, msg_id)))
+            try:
+                await events.emit("msg.done", {"msg_id": msg_id, "full_text": full_text, "duration_ms": int((time.time()-t0)*1000), "tts_count": len(tts_tasks)})
+            except Exception:
+                pass
             await _send({"type": "text_done", "message_id": msg_id, "full_content": full_text})
 
     tail = chunker.finalize()
@@ -169,10 +200,17 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     await history.save_message(session_id, "assistant", full_text, event_type)
     emotion, intensity = persona.classify_emotion(full_text)
     await _send({"type": "avatar_emotion", "emotion": emotion, "intensity": intensity})
+    try:
+        await events.emit("msg.emotion", {"emotion": emotion, "intensity": intensity})
+    except Exception:
+        pass
     if not action_sent:
-        _, fallback = persona.extract_action(full_text)
-        if fallback:
-            await _send({"type": "avatar_action", "action": fallback})
+        chosen = random.choice(persona.EXPRESSIVE_ACTIONS)
+        await _send({"type": "avatar_action", "action": chosen})
+        try:
+            await events.emit("msg.action", {"action": chosen})
+        except Exception:
+            pass
     await asyncio.gather(*tts_tasks, return_exceptions=True)
     _track(_maybe_summarize(session_id))
 

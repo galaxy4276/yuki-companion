@@ -2,6 +2,7 @@ import time
 import httpx
 import config
 from core.logging import logger
+from core import events
 
 _client = httpx.AsyncClient(timeout=config.MCP_TOOL_TIMEOUT_SECONDS)
 _tool_cache = {"ts": 0.0, "tools": None}
@@ -14,10 +15,20 @@ def _next_id() -> int:
     return _req_id
 
 def _headers() -> dict:
-    h = {"Content-Type": "application/json", "Accept": "application/json"}
+    h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
     if config.MCP_BEARER_TOKEN:
         h["Authorization"] = f"Bearer {config.MCP_BEARER_TOKEN}"
     return h
+
+def _parse_response(text: str, content_type: str) -> dict:
+    if "text/event-stream" in content_type:
+        for line in text.splitlines():
+            if line.startswith("data:"):
+                import json
+                return json.loads(line[5:].strip())
+        raise RuntimeError("MCP SSE: no data line")
+    import json
+    return json.loads(text)
 
 async def _rpc(method: str, params: dict | None = None) -> dict:
     body = {"jsonrpc": "2.0", "id": _next_id(), "method": method}
@@ -25,7 +36,7 @@ async def _rpc(method: str, params: dict | None = None) -> dict:
         body["params"] = params
     r = await _client.post(config.MCP_BASE_URL, json=body, headers=_headers())
     r.raise_for_status()
-    data = r.json()
+    data = _parse_response(r.text, r.headers.get("content-type", ""))
     if "error" in data:
         raise RuntimeError(f"MCP error: {data['error']}")
     return data.get("result", {})
@@ -59,6 +70,10 @@ async def list_tools(force: bool = False) -> list[dict]:
         _tool_cache["tools"] = converted
         _tool_cache["ts"] = time.time()
         logger.info(f"[MCP] {len(converted)}개 tool 로드: {[t['function']['name'] for t in converted]}")
+        try:
+            await events.emit("mcp.list_tools", {"count": len(converted), "names": [t['function']['name'] for t in converted]})
+        except Exception:
+            pass
         return converted
     except Exception as e:
         logger.warning(f"[MCP] tools/list 실패: {e}")
@@ -67,11 +82,25 @@ async def list_tools(force: bool = False) -> list[dict]:
 async def call_tool(name: str, args: dict) -> str:
     if name not in config.MCP_TOOL_ALLOWLIST:
         return f"Tool '{name}' not in allowlist"
+    t0 = time.time()
+    try:
+        await events.emit("mcp.call", {"name": name, "args": args})
+    except Exception:
+        pass
     try:
         result = await _rpc("tools/call", {"name": name, "arguments": args})
         contents = result.get("content", [])
         texts = [c.get("text", "") for c in contents if c.get("type") == "text"]
-        return "\n".join(texts) or str(result)
+        text_result = "\n".join(texts) or str(result)
+        try:
+            await events.emit("mcp.result", {"name": name, "text": text_result[:500], "duration_ms": int((time.time()-t0)*1000)})
+        except Exception:
+            pass
+        return text_result
     except Exception as e:
         logger.warning(f"[MCP] call_tool({name}) 실패: {e}")
+        try:
+            await events.emit("mcp.fail", {"name": name, "reason": str(e), "duration_ms": int((time.time()-t0)*1000)})
+        except Exception:
+            pass
         return f"[MCP 오류: {e}]"

@@ -93,8 +93,10 @@ async def handle_ws(websocket: WebSocket):
 
 async def _process_audio(audio_bytes: bytes, session_id: str):
     logger.info(f"[STT] 수신 {len(audio_bytes)} bytes")
+    await events.emit("stt.input", {"bytes": len(audio_bytes), "session_id": session_id})
     loop = asyncio.get_running_loop()
     text = await loop.run_in_executor(None, stt.transcribe, audio_bytes)
+    await events.emit("stt.output" if text else "stt.empty", {"text": text, "session_id": session_id})
     if not text:
         logger.info("[STT] 빈 결과 (무음/디코드 실패)")
         return
