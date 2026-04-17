@@ -13,6 +13,7 @@
     <span id="ws-dot" class="dot"></span>
     <span id="ws-text">disconnected</span>
   </div>
+  <button id="error-badge" class="hidden" title="최근 오류 (클릭하여 Errors 탭으로 이동)">⚠ <span id="error-count">0</span></button>
   <div class="controls">
     <input id="filter" type="text" placeholder="stage filter (e.g. llm.chunk)" />
     <button id="pause">⏸ Pause</button>
@@ -24,12 +25,14 @@
   <button class="tab" data-tab="llm">LLM <span class="count" id="count-llm">0</span></button>
   <button class="tab" data-tab="mcp">MCP <span class="count" id="count-mcp">0</span></button>
   <button class="tab" data-tab="tts">TTS <span class="count" id="count-tts">0</span></button>
+  <button class="tab tab-errors" data-tab="errors">⚠ Errors <span class="count" id="count-errors">0</span></button>
 </nav>
 <main>
   <ul class="event-list" id="list-voice"></ul>
   <ul class="event-list hidden" id="list-llm"></ul>
   <ul class="event-list hidden" id="list-mcp"></ul>
   <ul class="event-list hidden" id="list-tts"></ul>
+  <ul class="event-list hidden" id="list-errors"></ul>
 </main>
 <script src="debug.js"></script>
 </body>

@@ -4,17 +4,24 @@ const TAB_BY_PREFIX = {
 const MAX_PER_TAB = 200;
 
 const state = { paused: false, filter: '', activeTab: 'voice' };
-const counts = { voice: 0, llm: 0, mcp: 0, tts: 0 };
+const counts = { voice: 0, llm: 0, mcp: 0, tts: 0, errors: 0 };
+let unseenErrors = 0;
 
 const wsDot = document.getElementById('ws-dot');
 const wsText = document.getElementById('ws-text');
 const filterEl = document.getElementById('filter');
 const pauseBtn = document.getElementById('pause');
 const clearBtn = document.getElementById('clear');
+const errorBadge = document.getElementById('error-badge');
+const errorCountEl = document.getElementById('error-count');
 
 function tabFor(stage) {
   const prefix = stage.split('.')[0];
   return TAB_BY_PREFIX[prefix] || 'voice';
+}
+
+function isFail(stage) {
+  return stage.endsWith('.fail') || stage.endsWith('.error');
 }
 
 function fmtTs(ts) {
@@ -24,10 +31,10 @@ function fmtTs(ts) {
 
 function previewOf(payload) {
   if (!payload) return '';
-  const keys = ['text', 'content', 'name', 'reason', 'full_text'];
+  const keys = ['reason', 'text', 'content', 'name', 'full_text'];
   for (const k of keys) {
     if (typeof payload[k] === 'string' && payload[k]) {
-      return payload[k].slice(0, 100);
+      return payload[k].slice(0, 120);
     }
   }
   if (typeof payload.bytes === 'number') return `${payload.bytes} bytes`;
@@ -35,17 +42,11 @@ function previewOf(payload) {
   return JSON.stringify(payload).slice(0, 100);
 }
 
-function render(evt) {
-  if (state.paused) return;
-  if (state.filter && !evt.stage.includes(state.filter)) return;
-  const tab = tabFor(evt.stage);
-  const list = document.getElementById('list-' + tab);
-  if (!list) return;
-
+function buildCard(evt, fail) {
   const li = document.createElement('li');
-  const stageCls = evt.stage.endsWith('.fail') ? 'stage fail' : 'stage';
+  const stageCls = fail ? 'stage fail' : 'stage';
   li.innerHTML = `
-    <details>
+    <details${fail ? ' open' : ''}>
       <summary>
         <span class="ts">${fmtTs(evt.ts)}</span>
         <span class="${stageCls}">${evt.stage}</span>
@@ -56,15 +57,62 @@ function render(evt) {
   `;
   li.querySelector('.preview').textContent = previewOf(evt.payload);
   li.querySelector('pre').textContent = JSON.stringify(evt.payload, null, 2);
-  list.insertBefore(li, list.firstChild);
-
-  while (list.children.length > MAX_PER_TAB) {
-    list.removeChild(list.lastChild);
+  if (fail) {
+    li.classList.add('fail-card', 'fresh-fail');
+    setTimeout(() => li.classList.remove('fresh-fail'), 1500);
   }
+  return li;
+}
 
+function appendTo(listId, li) {
+  const list = document.getElementById(listId);
+  if (!list) return;
+  list.insertBefore(li, list.firstChild);
+  while (list.children.length > MAX_PER_TAB) list.removeChild(list.lastChild);
+}
+
+function bumpCount(tab) {
   counts[tab] = (counts[tab] || 0) + 1;
   const cnt = document.getElementById('count-' + tab);
   if (cnt) cnt.textContent = counts[tab];
+}
+
+function showErrorBadge() {
+  unseenErrors += 1;
+  errorCountEl.textContent = unseenErrors;
+  errorBadge.classList.remove('hidden');
+}
+
+function clearErrorBadge() {
+  unseenErrors = 0;
+  errorBadge.classList.add('hidden');
+}
+
+function render(evt) {
+  if (state.paused) return;
+  if (state.filter && !evt.stage.includes(state.filter)) return;
+
+  const fail = isFail(evt.stage);
+  const tab = tabFor(evt.stage);
+
+  appendTo('list-' + tab, buildCard(evt, fail));
+  bumpCount(tab);
+
+  if (fail) {
+    appendTo('list-errors', buildCard(evt, true));
+    bumpCount('errors');
+    if (state.activeTab !== 'errors') showErrorBadge();
+    flashTabErrors();
+  }
+}
+
+function flashTabErrors() {
+  const t = document.querySelector('.tab-errors');
+  if (!t) return;
+  t.style.animation = 'none';
+  t.offsetHeight;
+  t.style.animation = 'badge-pulse 1.4s';
+  setTimeout(() => { t.style.animation = ''; }, 1500);
 }
 
 function connectWS() {
@@ -85,16 +133,21 @@ function connectWS() {
 }
 connectWS();
 
+function activateTab(tab) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.event-list').forEach(l => l.classList.add('hidden'));
+  const btn = document.querySelector(`.tab[data-tab="${tab}"]`);
+  if (btn) btn.classList.add('active');
+  document.getElementById('list-' + tab).classList.remove('hidden');
+  state.activeTab = tab;
+  if (tab === 'errors') clearErrorBadge();
+}
+
 document.querySelectorAll('.tab').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.event-list').forEach(l => l.classList.add('hidden'));
-    btn.classList.add('active');
-    const tab = btn.dataset.tab;
-    document.getElementById('list-' + tab).classList.remove('hidden');
-    state.activeTab = tab;
-  });
+  btn.addEventListener('click', () => activateTab(btn.dataset.tab));
 });
+
+errorBadge.addEventListener('click', () => activateTab('errors'));
 
 filterEl.addEventListener('input', () => { state.filter = filterEl.value.trim(); });
 
@@ -108,6 +161,8 @@ clearBtn.addEventListener('click', () => {
   document.querySelectorAll('.event-list').forEach(l => { l.innerHTML = ''; });
   for (const k of Object.keys(counts)) {
     counts[k] = 0;
-    document.getElementById('count-' + k).textContent = 0;
+    const cnt = document.getElementById('count-' + k);
+    if (cnt) cnt.textContent = 0;
   }
+  clearErrorBadge();
 });
