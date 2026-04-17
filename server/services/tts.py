@@ -4,6 +4,7 @@ import httpx
 import config
 from core.logging import logger
 from core import events
+from core.events import since_ms
 
 _client = httpx.AsyncClient(
     timeout=60.0,
@@ -14,31 +15,19 @@ MAX_CHUNK_CHARS = 200
 
 async def synthesize(text: str) -> bytes | None:
     t0 = time.time()
-    try:
-        await events.emit("tts.request", {"text": text, "voice": config.TTS_VOICE, "len": len(text)})
-    except Exception:
-        pass
+    await events.emit("tts.request", {"text": text, "voice": config.TTS_VOICE, "len": len(text)})
     try:
         resp = await _client.post(
             f"{config.TTS_URL}/v1/audio/speech",
             json={"input": text, "voice": config.TTS_VOICE, "response_format": "wav"},
         )
         if resp.status_code == 200:
-            try:
-                await events.emit("tts.response", {"bytes": len(resp.content), "duration_ms": int((time.time()-t0)*1000), "len": len(text)})
-            except Exception:
-                pass
+            await events.emit("tts.response", {"bytes": len(resp.content), "duration_ms": since_ms(t0), "len": len(text)})
             return resp.content
-        try:
-            await events.emit("tts.fail", {"reason": f"HTTP {resp.status_code}", "text": text, "duration_ms": int((time.time()-t0)*1000)})
-        except Exception:
-            pass
+        await events.emit("tts.fail", {"reason": f"HTTP {resp.status_code}", "text": text, "duration_ms": since_ms(t0)})
     except Exception as e:
         logger.warning(f"[TTS] 오류: {e}")
-        try:
-            await events.emit("tts.fail", {"reason": str(e), "text": text, "duration_ms": int((time.time()-t0)*1000)})
-        except Exception:
-            pass
+        await events.emit("tts.fail", {"reason": str(e), "text": text, "duration_ms": since_ms(t0)})
     return None
 
 def to_base64(wav_bytes: bytes) -> str:

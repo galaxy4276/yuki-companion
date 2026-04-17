@@ -35,7 +35,12 @@ async def broadcast(payload: dict):
     _connections.difference_update(dead)
 
 orchestrator.set_broadcaster(broadcast)
-events.subscribe(lambda evt: broadcast({"type": "debug_event", **evt}))
+events.subscribe(lambda evt: broadcast({
+    "type": "debug_event",
+    "ts": evt["ts"],
+    "stage": evt["stage"],
+    "payload": evt["payload"],
+}))
 
 async def handle_ws(websocket: WebSocket):
     await websocket.accept()

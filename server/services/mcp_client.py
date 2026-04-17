@@ -3,6 +3,7 @@ import httpx
 import config
 from core.logging import logger
 from core import events
+from core.events import since_ms
 
 _client = httpx.AsyncClient(timeout=config.MCP_TOOL_TIMEOUT_SECONDS)
 _tool_cache = {"ts": 0.0, "tools": None}
@@ -69,38 +70,29 @@ async def list_tools(force: bool = False) -> list[dict]:
         } for t in filtered]
         _tool_cache["tools"] = converted
         _tool_cache["ts"] = time.time()
-        logger.info(f"[MCP] {len(converted)}개 tool 로드: {[t['function']['name'] for t in converted]}")
-        try:
-            await events.emit("mcp.list_tools", {"count": len(converted), "names": [t['function']['name'] for t in converted]})
-        except Exception:
-            pass
+        names = [t['function']['name'] for t in converted]
+        logger.info(f"[MCP] {len(converted)}개 tool 로드: {names}")
+        await events.emit("mcp.list_tools", {"count": len(converted), "names": names})
         return converted
     except Exception as e:
         logger.warning(f"[MCP] tools/list 실패: {e}")
         return []
 
+_RESULT_PREVIEW_CHARS = 500
+
 async def call_tool(name: str, args: dict) -> str:
     if name not in config.MCP_TOOL_ALLOWLIST:
         return f"Tool '{name}' not in allowlist"
     t0 = time.time()
-    try:
-        await events.emit("mcp.call", {"name": name, "args": args})
-    except Exception:
-        pass
+    await events.emit("mcp.call", {"name": name, "args": args})
     try:
         result = await _rpc("tools/call", {"name": name, "arguments": args})
         contents = result.get("content", [])
         texts = [c.get("text", "") for c in contents if c.get("type") == "text"]
         text_result = "\n".join(texts) or str(result)
-        try:
-            await events.emit("mcp.result", {"name": name, "text": text_result[:500], "duration_ms": int((time.time()-t0)*1000)})
-        except Exception:
-            pass
+        await events.emit("mcp.result", {"name": name, "text": text_result[:_RESULT_PREVIEW_CHARS], "duration_ms": since_ms(t0)})
         return text_result
     except Exception as e:
         logger.warning(f"[MCP] call_tool({name}) 실패: {e}")
-        try:
-            await events.emit("mcp.fail", {"name": name, "reason": str(e), "duration_ms": int((time.time()-t0)*1000)})
-        except Exception:
-            pass
+        await events.emit("mcp.fail", {"name": name, "reason": str(e), "duration_ms": since_ms(t0)})
         return f"[MCP 오류: {e}]"

@@ -22,6 +22,10 @@ def subscribe(fn: Callable[[dict], Awaitable[None]]):
     _subscribers.append(fn)
 
 
+def since_ms(t0: float) -> int:
+    return int((time.time() - t0) * 1000)
+
+
 async def emit(stage: str, payload: dict | None = None):
     evt = {"ts": time.time(), "stage": stage, "payload": payload or {}}
     if _jsonl_path:
@@ -31,8 +35,8 @@ async def emit(stage: str, payload: dict | None = None):
                     f.write(json.dumps(evt, ensure_ascii=False) + "\n")
         except Exception as e:
             logger.warning(f"[EventBus] JSONL write 실패: {e}")
-    for fn in list(_subscribers):
-        try:
-            await fn(evt)
-        except Exception as e:
-            logger.warning(f"[EventBus] subscriber 오류: {e}")
+    if _subscribers:
+        results = await asyncio.gather(*(fn(evt) for fn in _subscribers), return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                logger.warning(f"[EventBus] subscriber 오류: {r}")
