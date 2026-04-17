@@ -4,13 +4,14 @@ import os
 GEMMA_BASE_URL = "http://localhost:8001/v1"
 GEMMA_API_KEY  = "w7PhLd603vZQ8Om-Ys7wHeK6CZyzK4ngp1lwsYh2oyQ"
 GEMMA_MODEL    = "gemma-4"
-GEMMA_MAX_TOKENS = 2048
+GEMMA_MAX_TOKENS = 1024
+MCP_TOOL_RESULT_MAX_CHARS = 4000  # LLM에 다시 보낼 때 truncate
 
 # TTS
 TTS_URL = "http://localhost:8880"
 TTS_USERNAME = os.environ.get("TTS_USERNAME", "tts")
 TTS_PASSWORD = os.environ.get("TTS_PASSWORD", "SmartNewbie!0705")
-TTS_VOICE = os.environ.get("TTS_VOICE", "Ono_Anna")  # 일본 여성 화자
+TTS_VOICE = os.environ.get("TTS_VOICE", "Ono_Anna")  # 일본 여성 (Sohee는 EOS 미도달로 무한 generation)
 
 # STT
 WHISPER_MODEL  = "medium"
@@ -40,7 +41,7 @@ CLAUDE_POSTTOOL_TOOLS = {"Edit", "Write", "MultiEdit"}
 REPEAT_FAIL_THRESHOLD = 3
 RECENT_CMD_RING_SIZE = 10
 
-HISTORY_ROLLING_TURNS = 20
+HISTORY_ROLLING_TURNS = 8
 HISTORY_SUMMARY_ON_OVERFLOW = 10
 
 PROACTIVE_TEMPLATES_PATH = os.path.join(os.path.dirname(__file__), "data", "proactive_templates.json")
@@ -54,10 +55,11 @@ OCR_LANGUAGES = "kor+eng"
 MCP_BASE_URL = os.environ.get("MCP_BASE_URL", "https://mcp.sometime-central.com/mcp")
 MCP_BEARER_TOKEN = os.environ.get("MCP_BEARER_TOKEN", "")
 MCP_TOOL_ALLOWLIST = [
-    "ask-sometime", "search-knowledge", "health",
-    "get-metric", "get-revenue", "get-gem-stats",
+    "ask_sometime", "search_knowledge", "health",
+    "get_metric", "get_revenue", "get_gem_stats",
+    "ask_marketing_mentor", "get_fact",
 ]
 MCP_TOOL_LIST_TTL_SECONDS = 60
 MCP_MAX_TOOL_ITERATIONS = 5
-MCP_TOOL_TIMEOUT_SECONDS = 30
+MCP_TOOL_TIMEOUT_SECONDS = 60
 MCP_ENABLED = bool(MCP_BEARER_TOKEN)

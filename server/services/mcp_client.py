@@ -80,6 +80,10 @@ async def list_tools(force: bool = False) -> list[dict]:
 
 _RESULT_PREVIEW_CHARS = 500
 
+def _err_repr(e: Exception) -> str:
+    s = str(e)
+    return s if s else f"{type(e).__name__}"
+
 async def call_tool(name: str, args: dict) -> str:
     if name not in config.MCP_TOOL_ALLOWLIST:
         return f"Tool '{name}' not in allowlist"
@@ -90,9 +94,12 @@ async def call_tool(name: str, args: dict) -> str:
         contents = result.get("content", [])
         texts = [c.get("text", "") for c in contents if c.get("type") == "text"]
         text_result = "\n".join(texts) or str(result)
+        if len(text_result) > config.MCP_TOOL_RESULT_MAX_CHARS:
+            text_result = text_result[:config.MCP_TOOL_RESULT_MAX_CHARS] + f"\n...[truncated {len(text_result)-config.MCP_TOOL_RESULT_MAX_CHARS} chars]"
         await events.emit("mcp.result", {"name": name, "text": text_result[:_RESULT_PREVIEW_CHARS], "duration_ms": since_ms(t0)})
         return text_result
     except Exception as e:
-        logger.warning(f"[MCP] call_tool({name}) 실패: {e}")
-        await events.emit("mcp.fail", {"name": name, "reason": str(e), "duration_ms": since_ms(t0)})
-        return f"[MCP 오류: {e}]"
+        reason = _err_repr(e)
+        logger.warning(f"[MCP] call_tool({name}) 실패: {reason}")
+        await events.emit("mcp.fail", {"name": name, "reason": reason, "duration_ms": since_ms(t0)})
+        return f"[MCP 오류: {reason}]"
