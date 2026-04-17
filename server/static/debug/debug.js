@@ -1,5 +1,7 @@
 const TAB_BY_PREFIX = {
-  stt: 'voice', llm: 'llm', msg: 'llm', mcp: 'mcp', tts: 'tts',
+  stt: 'voice', llm: 'llm', msg: 'llm',
+  mcp: 'mcp', mem: 'mcp', wiki: 'mcp', episode: 'mcp',
+  tts: 'tts',
 };
 const MAX_PER_TAB = 200;
 

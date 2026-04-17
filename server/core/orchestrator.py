@@ -16,6 +16,7 @@ from services import mcp_client
 from services import vision
 from services.memory.store import MemoryStore
 from services.memory.wiki import WikiStore
+from services.memory import tools as mem_tools
 import core.context as ctx
 from core.logging import logger
 from core import events
@@ -28,6 +29,8 @@ _recent_cmds: deque = deque(maxlen=config.RECENT_CMD_RING_SIZE)
 # LTM singletons — bootstrap은 main.lifespan 에서 이미 수행됨
 _memory = MemoryStore(config.YUKI_MEMORY_DIR)
 _wiki = WikiStore(config.YUKI_WIKI_DIR)
+mem_tools.init(_memory, _wiki)
+_MEM_TOOL_NAMES = mem_tools.names()
 
 
 _templates_cache: dict = {"mtime": 0.0, "data": None}
@@ -110,7 +113,10 @@ async def _tool_loop(messages: list[dict], tools: list[dict]) -> list[dict]:
                 args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
             except Exception:
                 args = {}
-            result = await mcp_client.call_tool(name, args)
+            if name in _MEM_TOOL_NAMES:
+                result = await mem_tools.dispatch(name, args)
+            else:
+                result = await mcp_client.call_tool(name, args)
             messages.append({
                 "role": "tool", "tool_call_id": tc.get("id", ""),
                 "name": name, "content": result,
@@ -142,11 +148,12 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     recent_memory = _mem_body + ("\n\n[최근 세션]\n" + "\n---\n".join(_eps) if _eps else "")
     system_prompt = persona.build_system_prompt(ctx.get(), recent_memory=recent_memory)
 
-    recent, summary, tools = await asyncio.gather(
+    recent, summary, mcp_tools = await asyncio.gather(
         history.get_recent(session_id, limit=config.HISTORY_ROLLING_TURNS),
         history.get_latest_summary(session_id),
         mcp_client.list_tools() if config.MCP_ENABLED else _noop_list(),
     )
+    tools = (mcp_tools or []) + mem_tools.list_tools()
 
     messages = [{"role": "system", "content": system_prompt}]
     if summary:
