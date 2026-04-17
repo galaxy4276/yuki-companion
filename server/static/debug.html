@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yuki Debug</title>
+<link rel="stylesheet" href="debug.css">
+</head>
+<body>
+<header>
+  <h1>Yuki Debug</h1>
+  <div class="status">
+    <span id="ws-dot" class="dot"></span>
+    <span id="ws-text">disconnected</span>
+  </div>
+  <div class="controls">
+    <input id="filter" type="text" placeholder="stage filter (e.g. llm.chunk)" />
+    <button id="pause">⏸ Pause</button>
+    <button id="clear">🗑 Clear all</button>
+  </div>
+</header>
+<nav class="tabs">
+  <button class="tab active" data-tab="voice">Voice <span class="count" id="count-voice">0</span></button>
+  <button class="tab" data-tab="llm">LLM <span class="count" id="count-llm">0</span></button>
+  <button class="tab" data-tab="mcp">MCP <span class="count" id="count-mcp">0</span></button>
+  <button class="tab" data-tab="tts">TTS <span class="count" id="count-tts">0</span></button>
+</nav>
+<main>
+  <ul class="event-list" id="list-voice"></ul>
+  <ul class="event-list hidden" id="list-llm"></ul>
+  <ul class="event-list hidden" id="list-mcp"></ul>
+  <ul class="event-list hidden" id="list-tts"></ul>
+</main>
+<script src="debug.js"></script>
+</body>
+</html>
