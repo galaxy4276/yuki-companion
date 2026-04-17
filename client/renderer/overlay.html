@@ -132,6 +132,57 @@
     }
     #mic-meter.active #mic-meter-bar { background: #f59e0b; }
 
+    /* 음성 입력 뱃지 (우측 상단) */
+    #voice-badge {
+      position: fixed;
+      top: 8px; right: 8px;
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(20, 10, 40, 0.92);
+      border: 1px solid rgba(167, 139, 250, 0.5);
+      border-radius: 14px;
+      padding: 5px 10px 5px 8px;
+      font-size: 11px; color: #f0eeff;
+      font-family: 'Segoe UI', sans-serif;
+      backdrop-filter: blur(8px);
+      opacity: 0;
+      transform: translateY(-6px);
+      transition: opacity 0.2s, transform 0.2s, border-color 0.2s, background 0.2s;
+      pointer-events: none;
+      z-index: 50;
+    }
+    #voice-badge.visible { opacity: 1; transform: translateY(0); }
+    #voice-badge.recording {
+      background: rgba(60, 20, 20, 0.95);
+      border-color: #ef4444;
+      color: #fca5a5;
+    }
+    #voice-badge.processing {
+      background: rgba(20, 30, 60, 0.95);
+      border-color: #60a5fa;
+      color: #bfdbfe;
+    }
+    #voice-badge .vb-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #6b7280;
+      flex-shrink: 0;
+    }
+    #voice-badge.recording .vb-dot {
+      background: #ef4444;
+      animation: vb-pulse 0.9s infinite;
+    }
+    #voice-badge.processing .vb-dot {
+      background: #60a5fa;
+      animation: vb-spin 1s linear infinite;
+    }
+    @keyframes vb-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: 0.4; transform: scale(0.7); }
+    }
+    @keyframes vb-spin {
+      0% { box-shadow: 0 0 0 0 rgba(96,165,250,0.7); }
+      100% { box-shadow: 0 0 0 8px rgba(96,165,250,0); }
+    }
+
     /* 디버그 패널 */
     #debug-panel {
       position: fixed;
@@ -151,6 +202,11 @@
 <body>
 
 <div id="bubble"></div>
+
+<div id="voice-badge">
+  <span class="vb-dot"></span>
+  <span class="vb-text">대기</span>
+</div>
 
 <div id="canvas-wrap">
   <canvas id="vrm-canvas" width="400" height="540"></canvas>
@@ -829,6 +885,17 @@ async function connectWS() {
         window.yukiAPI.logDump?.('ACTION_RX', { action: d.action, ts: Date.now() })
         playAction(d.action)
         break
+      case 'stt_result':
+        if (d.text) {
+          setVoiceBadge('processing', `"${d.text.slice(0, 40)}"`, 4000)
+        } else {
+          setVoiceBadge(null, '인식 실패', 2500)
+        }
+        break
+      case 'debug_event':
+        if (d.stage === 'stt.input') setVoiceBadge('processing', `전송 ${d.payload?.bytes||0}B`)
+        else if (d.stage === 'stt.empty') setVoiceBadge(null, '무음', 2500)
+        break
     }
   }
 }
@@ -961,6 +1028,7 @@ async function startListen() {
         if (!hasVoice && voiceMs >= MIN_VOICE_MS) {
           hasVoice = true
           hasVoiceSegment = true
+          setVoiceBadge('recording', '듣는 중')
         }
       } else {
         silenceMs += dt
@@ -969,6 +1037,7 @@ async function startListen() {
           hasVoice = false
           silenceMs = 0
           if (listenRecorder && listenRecorder.state === 'recording') {
+            setVoiceBadge('processing', '인식 중...')
             listenRecorder.stop()
           }
         }
@@ -1012,6 +1081,27 @@ function updateMicMeter(rms, voiceActive) {
   const pct = Math.min(100, Math.round(rms / 0.06 * 100))
   _micBar.style.width = pct + '%'
   _micMeter.classList.toggle('active', voiceActive)
+}
+
+const _voiceBadge = document.getElementById('voice-badge')
+const _voiceBadgeText = _voiceBadge?.querySelector('.vb-text')
+let _voiceBadgeHideTimer = null
+function setVoiceBadge(state, text, autoHideMs = 0) {
+  if (!_voiceBadge) return
+  _voiceBadge.classList.remove('recording', 'processing')
+  if (state) _voiceBadge.classList.add(state)
+  _voiceBadge.classList.add('visible')
+  if (_voiceBadgeText) _voiceBadgeText.textContent = text
+  clearTimeout(_voiceBadgeHideTimer)
+  if (autoHideMs > 0) {
+    _voiceBadgeHideTimer = setTimeout(() => {
+      _voiceBadge.classList.remove('visible')
+    }, autoHideMs)
+  }
+}
+function hideVoiceBadge() {
+  clearTimeout(_voiceBadgeHideTimer)
+  _voiceBadge?.classList.remove('visible')
 }
 
 document.getElementById('btn-mic').addEventListener('click', () => {
