@@ -30,6 +30,14 @@ _recent_cmds: deque = deque(maxlen=config.RECENT_CMD_RING_SIZE)
 # LTM singletons — bootstrap은 main.lifespan 에서 이미 수행됨
 _memory = MemoryStore(config.YUKI_MEMORY_DIR)
 _wiki = WikiStore(config.YUKI_WIKI_DIR)
+try:
+    from services.memory.index import WikiIndex
+    _wiki_index = WikiIndex(str(__import__('pathlib').Path(config.YUKI_WIKI_DIR) / ".index.db"))
+    _wiki.set_index(_wiki_index)
+except Exception as _e:
+    from core.logging import logger as _log
+    _log.warning(f"[orchestrator] wiki index init skipped: {_e}")
+    _wiki_index = None
 mem_tools.init(_memory, _wiki)
 flusher.init(_memory)
 _MEM_TOOL_NAMES = mem_tools.names()

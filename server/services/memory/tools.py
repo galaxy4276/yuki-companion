@@ -7,12 +7,29 @@ from core import events
 
 _memory = None
 _wiki = None
+_index = None
 
 
 def init(memory_store, wiki_store):
     global _memory, _wiki
     _memory = memory_store
     _wiki = wiki_store
+
+
+def _get_index():
+    global _index
+    if _index is not None:
+        return _index
+    try:
+        from services.memory.index import WikiIndex
+        from pathlib import Path
+        import config
+        db_path = str(Path(config.YUKI_WIKI_DIR) / ".index.db")
+        _index = WikiIndex(db_path)
+        return _index
+    except Exception as e:
+        logger.warning(f"[memory.tools] index init failed: {e}")
+        return None
 
 
 _SCHEMAS = [
@@ -55,7 +72,13 @@ _SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "term": {"type": "string"},
-                    "type": {"type": "string", "enum": ["concept", "entity", "comparison"], "description": "없으면 전체"}
+                    "type": {"type": "string", "enum": ["concept", "entity", "comparison"], "description": "없으면 전체"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["keyword", "semantic", "hybrid"],
+                        "default": "hybrid",
+                        "description": "keyword=substring, semantic=vector only, hybrid=vector+keyword (기본)"
+                    }
                 },
                 "required": ["term"]
             }
@@ -157,31 +180,68 @@ async def _memory_save(category: str, content: str) -> str:
     return f"저장 완료 [{category}]"
 
 
-async def _wiki_search(term: str, type: str | None = None) -> str:
+async def _wiki_search(term: str, type: str | None = None, mode: str = "hybrid") -> str:
     if _wiki is None:
         return "wiki 미초기화"
-    term_l = (term or "").lower()
-    # 단순 substring 검색 (Phase 5에서 시맨틱 추가)
-    pages = _wiki.list_pages(page_type=None)
+    mode = (mode or "hybrid").lower()
+    if mode not in ("keyword", "semantic", "hybrid"):
+        mode = "hybrid"
+
+    if mode == "keyword":
+        term_l = (term or "").lower()
+        pages = _wiki.list_pages(page_type=None)
+        results = []
+        for p in pages:
+            if type and p.get("type", "").rstrip("s") != type.rstrip("s"):
+                continue
+            name = p.get("name", "")
+            title = p.get("title", "")
+            try:
+                from services.memory.frontmatter import load_page
+                post = load_page(p["path"])
+                body = post.content if post else ""
+            except Exception:
+                body = ""
+            if term_l in name.lower() or term_l in title.lower() or term_l in body.lower():
+                idx = body.lower().find(term_l)
+                snip = body[max(0, idx-60):idx+120].replace("\n", " ") if idx >= 0 else (title or name)
+                results.append(f"- [[{name}]] ({p.get('type')}): {snip}")
+        await events.emit("wiki.search", {"term": term, "type": type, "mode": mode, "hits": len(results)})
+        if not results:
+            return f"wiki '{term}' 매칭 없음"
+        return "wiki 검색 결과:\n" + "\n".join(results[:10])
+
+    # semantic / hybrid — vector-backed
+    idx = _get_index()
+    if idx is None or not getattr(idx, "_ready", False):
+        # fall back to keyword if index unavailable
+        logger.info("[memory.tools] wiki index unavailable, falling back to keyword")
+        return await _wiki_search(term, type=type, mode="keyword")
+
+    if mode == "semantic":
+        hits = idx.search(term, k=5)
+    else:
+        hits = idx.search_hybrid(term, k=5)
+
+    # Optional type filter (post-filter on path)
     results = []
-    for p in pages:
-        if type and p.get("type", "").rstrip("s") != type.rstrip("s"):
+    for path, score, snippet in hits:
+        # Path-based type detection: /wiki/<type>/<name>.md
+        from pathlib import Path as _P
+        p_obj = _P(path)
+        ptype = p_obj.parent.name  # concepts|entities|comparisons
+        if type and ptype.rstrip("s") != type.rstrip("s"):
             continue
-        name = p.get("name", "")
-        title = p.get("title", "")
-        # load content for search
-        try:
-            from services.memory.frontmatter import load_page
-            post = load_page(p["path"])
-            body = post.content if post else ""
-        except Exception:
-            body = ""
-        if term_l in name.lower() or term_l in title.lower() or term_l in body.lower():
-            # snippet
-            idx = body.lower().find(term_l)
-            snip = body[max(0, idx-60):idx+120].replace("\n", " ") if idx >= 0 else (title or name)
-            results.append(f"- [[{name}]] ({p.get('type')}): {snip}")
-    await events.emit("wiki.search", {"term": term, "type": type, "hits": len(results)})
+        name = p_obj.stem
+        # semantic uses distance (lower better) — normalize to a display score
+        if mode == "semantic":
+            display = max(0.0, 1.0 - float(score))
+        else:
+            display = float(score)
+        snip = (snippet or "").replace("\n", " ")[:180]
+        results.append(f"- [[{name}]] ({ptype}, score={display:.2f}): {snip}")
+
+    await events.emit("wiki.search", {"term": term, "type": type, "mode": mode, "hits": len(results)})
     if not results:
         return f"wiki '{term}' 매칭 없음"
     return "wiki 검색 결과:\n" + "\n".join(results[:10])
