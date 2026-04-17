@@ -1,4 +1,5 @@
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket
@@ -11,10 +12,12 @@ from services.stt import load_whisper
 from api.ws_handler import handle_ws
 from api.hooks import router as hooks_router
 import core.proactive as proactive
+from core import events
 from core.logging import logger
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    events.init(os.path.join(os.path.dirname(__file__), "logs"))
     await init_db()
     persona.load_persona()
     load_whisper()
@@ -26,6 +29,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="VTuber Companion Orchestrator", lifespan=lifespan)
 app.include_router(hooks_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(_STATIC_DIR, exist_ok=True)
+app.mount("/debug", StaticFiles(directory=_STATIC_DIR, html=True), name="debug")
 
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):

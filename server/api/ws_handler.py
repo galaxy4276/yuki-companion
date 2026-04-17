@@ -4,7 +4,7 @@ import base64
 from fastapi import WebSocket, WebSocketDisconnect
 
 import core.orchestrator as orchestrator
-from core import context
+from core import context, events
 import services.stt as stt
 from core.logging import logger
 
@@ -35,6 +35,7 @@ async def broadcast(payload: dict):
     _connections.difference_update(dead)
 
 orchestrator.set_broadcaster(broadcast)
+events.subscribe(lambda evt: broadcast({"type": "debug_event", **evt}))
 
 async def handle_ws(websocket: WebSocket):
     await websocket.accept()
@@ -91,9 +92,12 @@ async def handle_ws(websocket: WebSocket):
         _connections.discard(websocket)
 
 async def _process_audio(audio_bytes: bytes, session_id: str):
+    logger.info(f"[STT] 수신 {len(audio_bytes)} bytes")
     loop = asyncio.get_running_loop()
     text = await loop.run_in_executor(None, stt.transcribe, audio_bytes)
     if not text:
+        logger.info("[STT] 빈 결과 (무음/디코드 실패)")
         return
+    logger.info(f"[STT] 인식: {text!r}")
     await broadcast({"type": "stt_result", "text": text})
     await orchestrator.handle_message(text, session_id, "voice")
