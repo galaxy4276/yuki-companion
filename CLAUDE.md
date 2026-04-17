@@ -18,6 +18,36 @@ ssh -p 22022 deveungu@125.242.221.180
 
 Server code lives on that host (path referenced in `server/hooks/claude_hook.py`: `/home/deveungu/vtuber-companion/`). The client (`client/` in this repo) talks to it over `http://125.242.221.180:8002` / `ws://125.242.221.180:8002/ws` — those URLs are hardcoded in `client/main.js` and `server/hooks/terminal_hook.sh`.
 
+Orchestrator runs inside tmux session `yuki` on the GPU host. Restart pattern:
+```bash
+ssh -p 22022 deveungu@125.242.221.180 "tmux kill-session -t yuki; pgrep -f 'python.*main.py' | xargs -r kill; tmux new-session -d -s yuki -c /home/deveungu/vtuber-companion/server 'MCP_BEARER_TOKEN=<token> MCP_BASE_URL=https://mcp.sometime-central.com/mcp /home/deveungu/llm-env/bin/python main.py 2>&1 | tee logs/startup.log'"
+```
+
+## MCP Integration (sometime-central)
+
+Yuki orchestrates sometime-central MCP tools (매출·매칭·CS·Linear 등 37개) via `services/mcp_client.py`. The MCP server itself is **deployed on macmini** (`macmini.tail6899df.ts.net`) and exposed through Tailscale Funnel at `https://mcp.sometime-central.com/mcp`. Yuki never runs its own MCP server — treat the deployed endpoint as authoritative.
+
+- **Bearer token source of truth**: `~/sometime-central/.secrets/.env` on macmini (`MCP_HTTP_BEARER_TOKEN=...`). Do not regenerate locally — the deployed server will reject anything but the live token.
+- **Response format**: MCP endpoint requires `Accept: application/json, text/event-stream` and returns SSE (`event: message\ndata: {json}`). `mcp_client._parse_response` handles both JSON and SSE.
+- **Tool name convention**: MCP tools use underscores (`ask_sometime`, `get_revenue`, `get_gem_stats`), not hyphens. Keep `MCP_TOOL_ALLOWLIST` in sync with the live tool list (`curl -H "Authorization: Bearer <token>" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' https://mcp.sometime-central.com/mcp`).
+
+### macmini access (for pulling the MCP bearer token)
+
+macmini is reachable three ways. Prefer LAN; fall back to Tailscale; public hostname only when off-network.
+
+| Route | Address | Notes |
+|-------|---------|-------|
+| LAN | `smartnewbie_macmini@192.168.0.37` | Same home network; lowest latency |
+| Tailscale | `smartnewbie_macmini@100.83.156.9` (`macmini.tail6899df.ts.net`) | Works off-network if Tailscale is up |
+| Public (ops tunnel) | `smartnewbie_macmini@218.38.137.28` | WAN DNS resolves here |
+
+SSH username is `smartnewbie_macmini` (not `smartnewbie`). Pubkey auth works once `~/.ssh/authorized_keys` on macmini contains your key. The `authorized_keys` already holds two operator keys — append, never overwrite.
+
+Pull the live MCP token:
+```bash
+ssh smartnewbie_macmini@192.168.0.37 "grep MCP_HTTP_BEARER_TOKEN ~/sometime-central/.secrets/.env"
+```
+
 ## Commands
 
 ### Client (Electron, run on Mac/Windows)
