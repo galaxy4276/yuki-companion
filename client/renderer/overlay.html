@@ -119,6 +119,19 @@
     }
     #ws-dot.ok { background: #4ade80; }
 
+    /* 마이크 레벨 미터 */
+    #mic-meter {
+      width: 40px; height: 6px; border-radius: 3px;
+      background: rgba(20,10,40,0.7);
+      overflow: hidden; position: relative;
+    }
+    #mic-meter-bar {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      width: 0%; background: #4ade80;
+      transition: width 0.05s linear, background 0.1s;
+    }
+    #mic-meter.active #mic-meter-bar { background: #f59e0b; }
+
     /* 디버그 패널 */
     #debug-panel {
       position: fixed;
@@ -151,6 +164,7 @@
 
 <div id="chat-bar">
   <span id="ws-dot" title="연결 상태"></span>
+  <div id="mic-meter" title="마이크 레벨 (주황=음성감지)"><div id="mic-meter-bar"></div></div>
   <input id="chat-input" type="text" placeholder="유키에게 말 걸기..." autocomplete="off" />
   <button id="chat-send">▶</button>
 </div>
@@ -875,9 +889,10 @@ let voiceMs = 0
 let silenceMs = 0
 let lastFrameTs = 0
 
-const VAD_THRESHOLD = 0.025
-const MIN_VOICE_MS = 300
+const VAD_THRESHOLD = 0.012
+const MIN_VOICE_MS = 150
 const SILENCE_END_MS = 800
+const VOICE_HANGOVER_MS = 250  // silence 동안 voiceMs 유지 (자음 사이 gap 흡수)
 
 function buildRecorder() {
   const rec = new MediaRecorder(listenStream, { mimeType: 'audio/webm' })
@@ -948,16 +963,17 @@ async function startListen() {
           hasVoiceSegment = true
         }
       } else {
-        silenceMs += dt; voiceMs = 0
+        silenceMs += dt
+        if (silenceMs > VOICE_HANGOVER_MS) voiceMs = 0
         if (hasVoice && silenceMs >= SILENCE_END_MS) {
-          // 발화 종료 감지
           hasVoice = false
           silenceMs = 0
           if (listenRecorder && listenRecorder.state === 'recording') {
-            listenRecorder.stop()  // triggers onstop → send + restart
+            listenRecorder.stop()
           }
         }
       }
+      updateMicMeter(rms, hasVoice)
       listenRaf = requestAnimationFrame(loop)
     }
     loop()
@@ -987,6 +1003,15 @@ function updateMicBtn() {
   const b = document.getElementById('btn-mic')
   if (b) b.textContent = listenEnabled ? '🎤' : '🔇'
   if (b) b.style.color = listenEnabled ? '#4ade80' : '#a78bfa'
+}
+
+const _micMeter = document.getElementById('mic-meter')
+const _micBar = document.getElementById('mic-meter-bar')
+function updateMicMeter(rms, voiceActive) {
+  if (!_micBar) return
+  const pct = Math.min(100, Math.round(rms / 0.06 * 100))
+  _micBar.style.width = pct + '%'
+  _micMeter.classList.toggle('active', voiceActive)
 }
 
 document.getElementById('btn-mic').addEventListener('click', () => {
