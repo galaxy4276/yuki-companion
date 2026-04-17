@@ -23,15 +23,6 @@ _broadcaster: Callable[[dict], Awaitable[None]] | None = None
 _tasks: set[asyncio.Task] = set()
 _recent_cmds: deque = deque(maxlen=config.RECENT_CMD_RING_SIZE)
 
-_TOOL_TRIGGER_KEYWORDS = (
-    "썸타임", "매출", "revenue", "매칭", "매치", "유저", "가입", "구슬", "gem",
-    "지표", "metric", "dau", "wau", "mau", "kpi", "결제", "환불", "payment",
-    "운영", "cs", "버그", "리포트", "리뷰", "대학", "학교",
-)
-
-def _needs_tools(content: str) -> bool:
-    low = content.lower()
-    return any(k in low for k in _TOOL_TRIGGER_KEYWORDS)
 
 _templates_cache: dict = {"mtime": 0.0, "data": None}
 
@@ -142,11 +133,10 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
 
     system_prompt = persona.build_system_prompt(ctx.get())
 
-    want_tools = config.MCP_ENABLED and _needs_tools(content)
     recent, summary, tools = await asyncio.gather(
         history.get_recent(session_id, limit=config.HISTORY_ROLLING_TURNS),
         history.get_latest_summary(session_id),
-        mcp_client.list_tools() if want_tools else _noop_list(),
+        mcp_client.list_tools() if config.MCP_ENABLED else _noop_list(),
     )
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -155,8 +145,7 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     messages.extend(recent)
 
     messages = vision.prepare(messages)
-    if want_tools and tools:
-        logger.info(f"[Orchestrator] tool-loop 진입 ({len(tools)}개 tool)")
+    if tools:
         messages = await _tool_loop(messages, tools)
 
     await _send_emotion("thinking", 0.7)
