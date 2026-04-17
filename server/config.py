@@ -4,8 +4,12 @@ import os
 GEMMA_BASE_URL = "http://localhost:8001/v1"
 GEMMA_API_KEY  = "w7PhLd603vZQ8Om-Ys7wHeK6CZyzK4ngp1lwsYh2oyQ"
 GEMMA_MODEL    = "gemma-4"
-GEMMA_MAX_TOKENS = 1024
+GEMMA_MAX_TOKENS = 200  # 1-2문장 답변 유도 (v2 persona 기준)
 MCP_TOOL_RESULT_MAX_CHARS = 4000  # LLM에 다시 보낼 때 truncate
+
+# LTM 주입 cap — prefill 증가 억제
+RECENT_MEMORY_MAX_CHARS = 600
+EPISODE_MAX_CHARS = 300
 
 # TTS
 TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "elevenlabs")  # qwen | elevenlabs

@@ -153,8 +153,9 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     t0 = time.time()
     await events.emit("msg.start", {"content": content, "session_id": session_id, "event_type": event_type, "msg_id": msg_id})
 
-    _mem_body = _memory.load_memory()
+    _mem_body = (_memory.load_memory() or "")[-config.RECENT_MEMORY_MAX_CHARS:]
     _eps = _memory.load_recent_episode(k=1)
+    _eps = [e[:config.EPISODE_MAX_CHARS] for e in _eps]
     recent_memory = _mem_body + ("\n\n[최근 세션]\n" + "\n---\n".join(_eps) if _eps else "")
     system_prompt = persona.build_system_prompt(ctx.get(), recent_memory=recent_memory)
 
