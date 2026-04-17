@@ -29,9 +29,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="VTuber Companion Orchestrator", lifespan=lifespan)
 app.include_router(hooks_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-os.makedirs(_STATIC_DIR, exist_ok=True)
-app.mount("/debug", StaticFiles(directory=_STATIC_DIR, html=True), name="debug")
+_DEBUG_DIR = os.path.join(os.path.dirname(__file__), "static", "debug")
+os.makedirs(_DEBUG_DIR, exist_ok=True)
+app.mount("/debug", StaticFiles(directory=_DEBUG_DIR, html=True), name="debug")
 
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
