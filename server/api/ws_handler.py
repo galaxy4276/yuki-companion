@@ -6,6 +6,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 import core.orchestrator as orchestrator
 from core import context, events
 import services.stt as stt
+from services.memory import flusher
 from core.logging import logger
 
 _connections: set[WebSocket] = set()
@@ -95,6 +96,10 @@ async def handle_ws(websocket: WebSocket):
 
     except WebSocketDisconnect:
         _connections.discard(websocket)
+        try:
+            _track(flusher.flush_episode("disconnect"))
+        except Exception:
+            pass
 
 async def _process_audio(audio_bytes: bytes, session_id: str):
     logger.info(f"[STT] 수신 {len(audio_bytes)} bytes")

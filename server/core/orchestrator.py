@@ -17,6 +17,7 @@ from services import vision
 from services.memory.store import MemoryStore
 from services.memory.wiki import WikiStore
 from services.memory import tools as mem_tools
+from services.memory import flusher
 import core.context as ctx
 from core.logging import logger
 from core import events
@@ -30,6 +31,7 @@ _recent_cmds: deque = deque(maxlen=config.RECENT_CMD_RING_SIZE)
 _memory = MemoryStore(config.YUKI_MEMORY_DIR)
 _wiki = WikiStore(config.YUKI_WIKI_DIR)
 mem_tools.init(_memory, _wiki)
+flusher.init(_memory)
 _MEM_TOOL_NAMES = mem_tools.names()
 
 
