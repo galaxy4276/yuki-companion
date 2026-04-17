@@ -18,7 +18,7 @@ TTS_VOICE = os.environ.get("TTS_VOICE", "Ono_Anna")  # Sohee는 EOS 미도달로
 
 # ElevenLabs (provider=elevenlabs)
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "sk_ea17cd9711839459d5e030ffa2900669b4a63da94df1143f")
-ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")  # Sarah (multilingual)
+ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "Lb7qkOn5hF8p7qfCDH8q")  # Annie — friendly/soft/cute Korean female
 ELEVENLABS_MODEL_ID = os.environ.get("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
 
 # STT
