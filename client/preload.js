@@ -24,7 +24,11 @@ contextBridge.exposeInMainWorld('yukiAPI', {
   onError: (fn) => ipcRenderer.on('error', (_, payload) => fn(payload)),
   onAvatarEmotion: (fn) => ipcRenderer.on('avatar-emotion', (_, payload) => fn(payload)),
   emitAvatarEmotion: (payload) => ipcRenderer.send('avatar-emotion', payload),
+  onAvatarAction: (fn) => ipcRenderer.on('avatar-action', (_, payload) => fn(payload)),
+  emitAvatarAction: (payload) => ipcRenderer.send('avatar-action', payload),
+  logDump: (tag, data) => ipcRenderer.send('log-dump', { tag, data }),
   onGlobalPttToggle: (fn) => ipcRenderer.on('global-ptt-toggle', () => fn()),
   captureScreen: () => ipcRenderer.invoke('capture-screen'),
   onScreenCaptureTrigger: (fn) => ipcRenderer.on('screen-capture-trigger', () => fn()),
+  onToggleDebug: (fn) => ipcRenderer.on('toggle-debug', () => fn()),
 })

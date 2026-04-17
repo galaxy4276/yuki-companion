@@ -111,6 +111,16 @@ ipcMain.on('avatar-emotion', (_, payload) => {
   mainWin?.webContents.send('avatar-emotion', payload)
 })
 
+ipcMain.on('avatar-action', (_, payload) => {
+  mainWin?.webContents.send('avatar-action', payload)
+})
+
+ipcMain.on('log-dump', (_, { tag, data }) => {
+  console.log(`\n========== [${tag}] ==========`)
+  console.log(JSON.stringify(data, null, 2))
+  console.log(`========== /[${tag}] ==========\n`)
+})
+
 ipcMain.handle('get-config', () => ({ WS_URL, SERVER_URL }))
 
 ipcMain.handle('capture-screen', async () => {
@@ -131,6 +141,9 @@ app.whenReady().then(() => {
   })
   globalShortcut.register('Alt+Shift+S', async () => {
     chatWin?.webContents.send('screen-capture-trigger')
+  })
+  globalShortcut.register('Alt+D', () => {
+    mainWin?.webContents.send('toggle-debug')
   })
 })
 

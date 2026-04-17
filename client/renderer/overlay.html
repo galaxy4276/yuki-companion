@@ -118,6 +118,21 @@
       transition: background 0.3s;
     }
     #ws-dot.ok { background: #4ade80; }
+
+    /* 디버그 패널 */
+    #debug-panel {
+      position: fixed;
+      top: 0; right: -440px;
+      width: 440px; height: 100vh;
+      background: #0a0a0a;
+      border-left: 1px solid #2a2a2a;
+      transition: right 0.25s ease;
+      z-index: 1000;
+      pointer-events: auto;
+      box-shadow: -4px 0 20px rgba(0,0,0,0.5);
+    }
+    #debug-panel.visible { right: 0; }
+    #debug-iframe { width: 100%; height: 100%; border: 0; background: #0a0a0a; }
   </style>
 </head>
 <body>
@@ -130,6 +145,7 @@
 
 <div id="controls">
   <button class="ctrl-btn" id="btn-chat" title="채팅 창">💬</button>
+  <button class="ctrl-btn" id="btn-mic" title="음성 인식 on/off">🎤</button>
   <button class="ctrl-btn" id="btn-mute" title="음소거">🔊</button>
 </div>
 
@@ -137,6 +153,10 @@
   <span id="ws-dot" title="연결 상태"></span>
   <input id="chat-input" type="text" placeholder="유키에게 말 걸기..." autocomplete="off" />
   <button id="chat-send">▶</button>
+</div>
+
+<div id="debug-panel">
+  <iframe id="debug-iframe" src="about:blank"></iframe>
 </div>
 
 <script type="importmap">
@@ -164,6 +184,26 @@ const camera = new THREE.PerspectiveCamera(30, 400 / 540, 0.1, 20)
 camera.position.set(0, 1.4, 3.5)
 camera.lookAt(0, 1.2, 0)
 
+// orbit camera state
+const orbit = {
+  target: new THREE.Vector3(0, 1.2, 0),
+  distance: 3.5,
+  yaw: 0,
+  pitch: 0,
+  active: false,
+  lastX: 0, lastY: 0,
+}
+function updateOrbitCamera() {
+  const cp = Math.cos(orbit.pitch), sp = Math.sin(orbit.pitch)
+  const cy = Math.cos(orbit.yaw),   sy = Math.sin(orbit.yaw)
+  camera.position.set(
+    orbit.target.x + orbit.distance * sy * cp,
+    orbit.target.y + orbit.distance * sp,
+    orbit.target.z + orbit.distance * cy * cp,
+  )
+  camera.lookAt(orbit.target)
+}
+
 const ambientLight = new THREE.AmbientLight(0xffffff, 1.2)
 const dirLight     = new THREE.DirectionalLight(0xffffff, 0.8)
 dirLight.position.set(1, 2, 2)
@@ -174,6 +214,217 @@ let currentVrm = null
 let clock      = new THREE.Clock()
 let isTalking  = false
 let talkTimer  = 0
+
+// ─── 포즈 프리셋 (단위: 도) — 토끼 모델용 ─────────────────────
+// 앞다리 = Arm(humanoid), 뒷다리 = Leg, 귀 = mimi_L/R_01~03, 꼬리 = sita_01~03
+const IDLE_POSE = {
+  leftUpperArm:  [0, 0, -60],
+  rightUpperArm: [0, 0,  60],
+  leftLowerArm:  [-5, 0, -8],
+  rightLowerArm: [-5, 0,  8],
+  leftShoulder:  [0, 0, -5],
+  rightShoulder: [0, 0,  5],
+  leftHand:  [0, 0, 0],
+  rightHand: [0, 0, 0],
+  head:  [0, 0, 0],
+  neck:  [0, 0, 0],
+  spine: [0, 0, 0],
+  chest: [0, 0, 0],
+  mimi_L_01: [0, 0, 0], mimi_L_02: [0, 0, 0], mimi_L_03: [0, 0, 0],
+  mimi_R_01: [0, 0, 0], mimi_R_02: [0, 0, 0], mimi_R_03: [0, 0, 0],
+  sita_01: [0, 0, 0], sita_02: [0, 0, 0], sita_03: [0, 0, 0],
+}
+const POSES = {
+  idle: IDLE_POSE,
+  perk: { ...IDLE_POSE,       // 귀 쫑긋 (과격)
+    mimi_L_01: [-35, 0, -8], mimi_L_02: [-15, 0, 0], mimi_L_03: [-8, 0, 0],
+    mimi_R_01: [-35, 0,  8], mimi_R_02: [-15, 0, 0], mimi_R_03: [-8, 0, 0],
+    head: [-8, 0, 0],
+  },
+  droop: { ...IDLE_POSE,      // 귀 축 축 (과격)
+    mimi_L_01: [85, 0, -20], mimi_L_02: [40, 0, 0], mimi_L_03: [25, 0, 0],
+    mimi_R_01: [85, 0,  20], mimi_R_02: [40, 0, 0], mimi_R_03: [25, 0, 0],
+    head: [15, 0, 0], neck: [8, 0, 0],
+  },
+  tilt: { ...IDLE_POSE,       // 고개 과격 갸웃
+    head: [10, -12, 35],
+    neck: [0, 0, 15],
+    mimi_L_01: [-10, 0, 30], mimi_R_01: [-10, 0, -15],
+  },
+  wave: { ...IDLE_POSE,       // 앞발 크게 흔들기
+    rightUpperArm: [0, 0, 165],
+    rightLowerArm: [0, 0, 50],
+    rightHand:     [0, 0, 25],
+    head:          [0, -18, -5],
+    mimi_L_01: [-20, 0, -5], mimi_R_01: [-25, 0,  8],
+  },
+  think: { ...IDLE_POSE,      // 과장된 고민 (몸 기울임 + 앞발 들기)
+    rightUpperArm: [-50, 25, 90],
+    rightLowerArm: [-110, 0, 15],
+    rightHand:     [0, 0, 0],
+    head:          [12, -18, 18],
+    neck:          [0, 0, 10],
+    spine:         [0, 0, -5],
+    mimi_L_01: [25, 0, 0], mimi_R_01: [25, 0, 0],
+  },
+  cheer: { ...IDLE_POSE,      // 만세 과격 (뒤로 젖히기)
+    leftUpperArm:  [0, 0, -175],
+    rightUpperArm: [0, 0,  175],
+    leftLowerArm:  [-30, 0, 0],
+    rightLowerArm: [-30, 0, 0],
+    head:          [-20, 0, 0],
+    spine:         [-8, 0, 0],
+    mimi_L_01: [-30, 0, -8], mimi_R_01: [-30, 0,  8],
+  },
+  shrug: { ...IDLE_POSE,      // 어깨 과격 들썩
+    leftShoulder:  [0, 0, -40],
+    rightShoulder: [0, 0,  40],
+    leftUpperArm:  [-20, 0, -105],
+    rightUpperArm: [-20, 0,  105],
+    leftLowerArm:  [-75, 0, -40],
+    rightLowerArm: [-75, 0,  40],
+    head: [-3, 0, 0],
+    mimi_L_01: [30, 0, 0], mimi_R_01: [30, 0, 0],
+  },
+  point: { ...IDLE_POSE,      // 앞발 크게 지시
+    rightShoulder: [0, 0, 15],
+    rightUpperArm: [-90, 0, 55],
+    rightLowerArm: [0, 0, 0],
+    rightHand:     [0, 0, -10],
+    head: [0, -25, 0],
+    spine: [0, -5, 0],
+  },
+  nod: { ...IDLE_POSE,        // 크게 끄덕
+    head: [32, 0, 0],
+    neck: [12, 0, 0],
+    mimi_L_01: [15, 0, 0], mimi_R_01: [15, 0, 0],
+  },
+  bow: { ...IDLE_POSE,        // 큰 절
+    spine: [28, 0, 0],
+    chest: [15, 0, 0],
+    head:  [20, 0, 0],
+    mimi_L_01: [40, 0, 0], mimi_R_01: [40, 0, 0],
+  },
+  wag: { ...IDLE_POSE,        // 꼬리 흔들기 (과격)
+    sita_01: [0, 0, 0], sita_02: [0, 0, 0], sita_03: [0, 0, 0],
+    mimi_L_01: [-15, 0, -5], mimi_R_01: [-15, 0,  5],
+    head: [-5, 0, 0],
+  },
+}
+
+// 동작 중 oscillate (도달 후 sin 오프셋)
+const OSCILLATORS = {
+  wave: [
+    { bone: 'rightHand',     axis: 2, amp: 30, freq: 5 },
+    { bone: 'rightLowerArm', axis: 2, amp: 15, freq: 5, phase: 0.3 },
+  ],
+  wag:  [
+    { bone: 'sita_01', axis: 2, amp: 55, freq: 5 },
+    { bone: 'sita_02', axis: 2, amp: 45, freq: 5, phase: 0.5 },
+    { bone: 'sita_03', axis: 2, amp: 30, freq: 5, phase: 1.0 },
+  ],
+  cheer: [
+    { bone: 'Hips', axis: 1, amp: 10, freq: 3 },  // Y축 회전 (좌우 흔들)
+  ],
+  nod: [
+    { bone: 'Head', axis: 0, amp: 12, freq: 3 },
+  ],
+}
+
+const POSE_DURATION_S = 0.45
+const POSE_HOLD_S     = 2.5
+let poseProgress = 1
+let poseStart    = {}
+let poseTarget   = {}
+let poseHold     = 0
+let currentPoseName = 'idle'
+
+function getBone(name) {
+  const h = currentVrm?.humanoid
+  return h?.getNormalizedBoneNode?.(name)
+      || h?.getBoneNode?.(name)
+      || currentVrm?.scene?.getObjectByName?.(name)
+      || null
+}
+
+let activeOscillators = []
+let oscStartTime = 0
+
+function applyPoseInstant(name) {
+  const pose = POSES[name] || POSES.idle
+  for (const [bone, deg] of Object.entries(pose)) {
+    const node = getBone(bone)
+    if (!node) continue
+    node.rotation.set(
+      THREE.MathUtils.degToRad(deg[0]),
+      THREE.MathUtils.degToRad(deg[1]),
+      THREE.MathUtils.degToRad(deg[2]),
+    )
+  }
+  currentPoseName = name
+  poseProgress = 1
+  poseHold = 0
+}
+
+function playAction(name) {
+  if (!currentVrm || !POSES[name]) return
+  const pose = POSES[name]
+  poseStart = {}
+  poseTarget = {}
+  for (const [bone, deg] of Object.entries(pose)) {
+    const node = getBone(bone)
+    if (!node) continue
+    poseStart[bone] = [node.rotation.x, node.rotation.y, node.rotation.z]
+    poseTarget[bone] = [
+      THREE.MathUtils.degToRad(deg[0]),
+      THREE.MathUtils.degToRad(deg[1]),
+      THREE.MathUtils.degToRad(deg[2]),
+    ]
+  }
+  poseProgress = 0
+  currentPoseName = name
+  poseHold = (name === 'idle') ? 0 : POSE_HOLD_S
+  activeOscillators = OSCILLATORS[name] || []
+  oscStartTime = clock.elapsedTime
+  // wag는 계속 흔들리도록 hold 연장
+  if (name === 'wag') poseHold = 4.0
+}
+
+function updatePose(delta) {
+  if (!currentVrm) return
+  if (poseProgress < 1) {
+    poseProgress = Math.min(1, poseProgress + delta / POSE_DURATION_S)
+    const t = 1 - Math.pow(1 - poseProgress, 3)  // easeOutCubic
+    for (const bone in poseTarget) {
+      const node = getBone(bone)
+      if (!node) continue
+      const s = poseStart[bone], e = poseTarget[bone]
+      node.rotation.set(
+        s[0] + (e[0] - s[0]) * t,
+        s[1] + (e[1] - s[1]) * t,
+        s[2] + (e[2] - s[2]) * t,
+      )
+    }
+  } else if (activeOscillators.length > 0) {
+    const t = clock.elapsedTime - oscStartTime
+    for (const osc of activeOscillators) {
+      const node = getBone(osc.bone)
+      if (!node) continue
+      const base = poseTarget[osc.bone] || [0, 0, 0]
+      const offset = Math.sin(t * osc.freq * Math.PI * 2 + (osc.phase || 0)) * THREE.MathUtils.degToRad(osc.amp)
+      const rot = [base[0], base[1], base[2]]
+      rot[osc.axis] = base[osc.axis] + offset
+      node.rotation.set(rot[0], rot[1], rot[2])
+    }
+    if (currentPoseName !== 'idle' && poseHold > 0) {
+      poseHold -= delta
+      if (poseHold <= 0) playAction('idle')
+    }
+  } else if (currentPoseName !== 'idle' && poseHold > 0) {
+    poseHold -= delta
+    if (poseHold <= 0) playAction('idle')
+  }
+}
 
 // on-screen debug (투명 배경 위 흰 텍스트)
 const debugEl = document.createElement('div')
@@ -200,27 +451,34 @@ loader.load(
       try { VRMUtils.rotateVRM0(vrm) } catch (e) { /* VRM 1.0 파일이면 필요없음 */ }
       scene.add(vrm.scene)
       currentVrm = vrm
+      window.__vrm = vrm  // DevTools inspection
 
-      // idle 포즈 (팔 내림 + 살짝 굽힘)
+      // ─── 본 인스펙션 덤프 (터미널로 전송) ──────────────────────
       try {
-        const h = vrm.humanoid
-        const r = (name, x=0, y=0, z=0) => {
-          const b = h?.getNormalizedBoneNode?.(name) || h?.getBoneNode?.(name)
-          if (b) b.rotation.set(
-            THREE.MathUtils.degToRad(x),
-            THREE.MathUtils.degToRad(y),
-            THREE.MathUtils.degToRad(z),
-          )
-        }
-        r('leftUpperArm',  0, 0, -72)
-        r('rightUpperArm', 0, 0,  72)
-        r('leftLowerArm',  -5, 0, -8)
-        r('rightLowerArm', -5, 0,  8)
-        r('leftShoulder',  0, 0, -5)
-        r('rightShoulder', 0, 0,  5)
-        r('leftHand',  0, 0, -5)
-        r('rightHand', 0, 0,  5)
-      } catch (e) { dbg('pose skip: ' + e.message) }
+        const humanoid = Object.entries(vrm.humanoid?.humanBones || {})
+          .map(([k, b]) => [k, b?.node?.name || null])
+        const allBones = []
+        vrm.scene.traverse(o => {
+          if (o.isBone || o.type === 'Bone') allBones.push(o.name)
+        })
+        const springCount = vrm.springBoneManager?.joints?.length ?? 0
+        const exprArr = vrm.expressionManager?.expressions || []
+        const expressions = exprArr.map((e, i) => ({
+          i, name: e.expressionName || e.name || null,
+          isBinary: e.isBinary, overrideBlink: e.overrideBlink,
+        }))
+        const exprMap = vrm.expressionManager?.expressionMap || {}
+        const exprMapKeys = Object.keys(exprMap)
+        const box = new THREE.Box3().setFromObject(vrm.scene)
+        const size = box.getSize(new THREE.Vector3())
+        window.yukiAPI.logDump('VRM_INSPECT', {
+          humanoid, allBones, springCount, expressions, exprMapKeys,
+          size: [+size.x.toFixed(3), +size.y.toFixed(3), +size.z.toFixed(3)],
+          boneCount: allBones.length,
+        })
+      } catch (e) { dbg('inspect err: ' + e.message) }
+
+      try { applyPoseInstant('idle') } catch (e) { dbg('pose skip: ' + e.message) }
 
       // 자동 카메라 프레이밍: 바운딩 박스 계산
       const box = new THREE.Box3().setFromObject(vrm.scene)
@@ -229,8 +487,9 @@ loader.load(
       const maxDim = Math.max(size.x, size.y, size.z)
       // 얼굴·상체만: 모델 top에서 아래로 0.3m 쯤
       const focusY = box.max.y - size.y * 0.15
-      camera.position.set(center.x, focusY, center.z + Math.max(1.5, maxDim * 1.2))
-      camera.lookAt(center.x, focusY, center.z)
+      orbit.target.set(center.x, focusY, center.z)
+      orbit.distance = Math.max(1.5, maxDim * 1.2)
+      updateOrbitCamera()
 
       dbg('OK: size=' + size.x.toFixed(2) + 'x' + size.y.toFixed(2) + 'x' + size.z.toFixed(2) +
           ' center=(' + center.x.toFixed(2) + ',' + center.y.toFixed(2) + ',' + center.z.toFixed(2) + ')')
@@ -280,11 +539,39 @@ function animate() {
   const delta = clock.getDelta()
 
   if (currentVrm) {
+    updatePose(delta)
     // 자연스러운 숨쉬기
     const t = clock.elapsedTime
     if (currentVrm.expressionManager) {
       const breath = Math.sin(t * 1.5) * 0.02
       currentVrm.scene.position.y = breath
+    }
+
+    // idle 엉덩이 씰룩 (pose interpolation 완료 + idle 상태일 때만)
+    if (currentPoseName === 'idle' && poseProgress >= 1) {
+      const hips = getBone('hips')
+      if (hips) {
+        // 과감한 좌우 트위스트 + 기울기 + 앞뒤 bounce
+        const swayY = Math.sin(t * 1.6) * THREE.MathUtils.degToRad(14)
+        const swayZ = Math.sin(t * 1.1) * THREE.MathUtils.degToRad(7)
+        const swayX = Math.sin(t * 2.2) * THREE.MathUtils.degToRad(3)
+        // 5초 주기로 1초간 강한 twist pulse
+        const cycle = t % 5
+        const pulse = (cycle < 1.0)
+          ? Math.sin(cycle * Math.PI) * THREE.MathUtils.degToRad(22)
+          : 0
+        hips.rotation.set(swayX, swayY + pulse, swayZ)
+      }
+      // 상체 반대 반응 (머리는 덜 흔들리게)
+      const spine = getBone('spine')
+      if (spine) {
+        spine.rotation.y = Math.sin(t * 1.6) * THREE.MathUtils.degToRad(-5)
+        spine.rotation.z = Math.sin(t * 1.1) * THREE.MathUtils.degToRad(-2.5)
+      }
+      const chest = getBone('chest')
+      if (chest) {
+        chest.rotation.y = Math.sin(t * 1.6) * THREE.MathUtils.degToRad(-2)
+      }
     }
 
     // 눈 깜빡임 (3~5초마다)
@@ -311,28 +598,90 @@ function animate() {
 }
 animate()
 
-// ─── 드래그 이동 ─────────────────────────────────────────────────
+// ─── 드래그 이동 + 카메라 orbit/pan ─────────────────────────────
 let dragStart = null
+let panActive = false
+let panLastX = 0, panLastY = 0
 const wrap = document.getElementById('canvas-wrap')
 
+function panCamera(dxPx, dyPx) {
+  // 거리 기반 스케일 — 가까울수록 덜 움직임
+  const scale = orbit.distance * 0.002
+  const forward = new THREE.Vector3()
+  camera.getWorldDirection(forward)
+  const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize()
+  const up = new THREE.Vector3().crossVectors(right, forward).normalize()
+  orbit.target.addScaledVector(right, -dxPx * scale)
+  orbit.target.addScaledVector(up,    dyPx * scale)
+  updateOrbitCamera()
+}
+
+// 우클릭 메뉴 방지
+wrap.addEventListener('contextmenu', (e) => e.preventDefault())
+
 wrap.addEventListener('mousedown', (e) => {
-  dragStart = { x: e.screenX, y: e.screenY }
   window.yukiAPI.setIgnoreMouse(false)
+  // 우클릭 또는 shift+휠 → pan (시점 이동)
+  if (e.button === 2 || (e.button === 1 && e.shiftKey)) {
+    e.preventDefault()
+    panActive = true
+    panLastX = e.clientX
+    panLastY = e.clientY
+  } else if (e.button === 1) {
+    // 휠 버튼 → 카메라 orbit (회전)
+    e.preventDefault()
+    orbit.active = true
+    orbit.lastX = e.clientX
+    orbit.lastY = e.clientY
+  } else if (e.button === 0) {
+    // 좌클릭 → 창 이동
+    dragStart = { x: e.screenX, y: e.screenY }
+  }
 })
 window.addEventListener('mousemove', (e) => {
+  if (panActive) {
+    const dx = e.clientX - panLastX
+    const dy = e.clientY - panLastY
+    panLastX = e.clientX
+    panLastY = e.clientY
+    panCamera(dx, dy)
+    return
+  }
+  if (orbit.active) {
+    const dx = e.clientX - orbit.lastX
+    const dy = e.clientY - orbit.lastY
+    orbit.lastX = e.clientX
+    orbit.lastY = e.clientY
+    orbit.yaw   -= dx * 0.01
+    orbit.pitch += dy * 0.01
+    orbit.pitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, orbit.pitch))
+    updateOrbitCamera()
+    return
+  }
   if (!dragStart) return
   const dx = e.screenX - dragStart.x
   const dy = e.screenY - dragStart.y
   window.yukiAPI.moveWindow(dx, dy)
   dragStart = { x: e.screenX, y: e.screenY }
 })
-window.addEventListener('mouseup', () => {
-  dragStart = null
+window.addEventListener('mouseup', (e) => {
+  if (e.button === 2) panActive = false
+  if (e.button === 1) { orbit.active = false; panActive = false }
+  if (e.button === 0) dragStart = null
 })
 
-// 마우스가 캐릭터 영역에 있으면 클릭 통과 해제
+// 휠 스크롤 → 줌
+wrap.addEventListener('wheel', (e) => {
+  e.preventDefault()
+  const factor = e.deltaY > 0 ? 1.08 : 0.93
+  orbit.distance = Math.max(0.5, Math.min(10, orbit.distance * factor))
+  updateOrbitCamera()
+}, { passive: false })
+
 wrap.addEventListener('mouseenter', () => window.yukiAPI.setIgnoreMouse(false))
-wrap.addEventListener('mouseleave', () => { if (!dragStart) window.yukiAPI.setIgnoreMouse(true) })
+wrap.addEventListener('mouseleave', () => {
+  if (!dragStart && !orbit.active && !panActive) window.yukiAPI.setIgnoreMouse(true)
+})
 
 // ─── 말풍선 ─────────────────────────────────────────────────────
 const bubble = document.getElementById('bubble')
@@ -345,30 +694,50 @@ function showBubble(text) {
   bubbleTimer = setTimeout(() => bubble.classList.remove('visible'), 6000)
 }
 
-// ─── 오디오 재생 ─────────────────────────────────────────────────
+// ─── 오디오 재생 (순차 큐) ───────────────────────────────────────
 let muted = false
 let audioCtx = null
+const audioQueue = []
+let audioPlaying = false
 
-async function playAudio(b64) {
-  if (muted) return
-  isTalking = true
-  if (!audioCtx) audioCtx = new AudioContext()
-
+async function decodeB64(b64) {
   const raw = atob(b64)
   const buf = new Uint8Array(raw.length)
   for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i)
+  return audioCtx.decodeAudioData(buf.buffer)
+}
 
-  const decoded = await audioCtx.decodeAudioData(buf.buffer)
-  const src = audioCtx.createBufferSource()
-  src.buffer = decoded
-  src.connect(audioCtx.destination)
-  src.start()
-  src.onended = () => {
-    isTalking = false
-    talkTimer = 0
-    if (window._talkAnim) window._talkAnim(false)
+async function drainAudioQueue() {
+  if (audioPlaying) return
+  audioPlaying = true
+  while (audioQueue.length) {
+    const b64 = audioQueue.shift()
+    try {
+      const decoded = await decodeB64(b64)
+      await new Promise((resolve) => {
+        const src = audioCtx.createBufferSource()
+        src.buffer = decoded
+        src.connect(audioCtx.destination)
+        src.onended = resolve
+        isTalking = true
+        if (window._talkAnim) window._talkAnim(true)
+        src.start()
+      })
+    } catch (e) {
+      console.warn('[audio] decode/play 실패:', e)
+    }
   }
-  if (window._talkAnim) window._talkAnim(true)
+  audioPlaying = false
+  isTalking = false
+  talkTimer = 0
+  if (window._talkAnim) window._talkAnim(false)
+}
+
+function playAudio(b64) {
+  if (muted) return
+  if (!audioCtx) audioCtx = new AudioContext()
+  audioQueue.push(b64)
+  drainAudioQueue()
 }
 
 // ─── IPC 이벤트 수신 ─────────────────────────────────────────────
@@ -378,7 +747,7 @@ window.yukiAPI.onPlayAudio(playAudio)
 // ─── 감정 → VRM expression 매핑 ─────────────────────────────────
 const EMOTION_VRM = {
   happy: 'happy', worried: 'sad', thinking: 'relaxed',
-  surprised: 'surprised', idle: 'neutral',
+  surprised: 'angry', idle: 'neutral',  // 이 모델엔 surprised 없음 → angry로 대체
 }
 function applyEmotion(emotion, intensity) {
   if (!currentVrm?.expressionManager) return
@@ -391,6 +760,25 @@ function applyEmotion(emotion, intensity) {
   }
 }
 window.yukiAPI.onAvatarEmotion(({emotion, intensity}) => applyEmotion(emotion, intensity))
+window.yukiAPI.onAvatarAction?.(({action}) => playAction(action))
+
+// ─── 디버그 패널 (Alt+D 토글) ────────────────────────────────────
+const debugPanel = document.getElementById('debug-panel')
+const debugIframe = document.getElementById('debug-iframe')
+let debugLoaded = false
+
+window.yukiAPI.onToggleDebug?.(async () => {
+  if (!debugLoaded) {
+    const cfg = await window.yukiAPI.getConfig()
+    debugIframe.src = cfg.SERVER_URL + '/debug/'
+    debugLoaded = true
+  }
+  debugPanel.classList.toggle('visible')
+  // 패널 열려있는 동안 mouse events 통과 해제
+  if (debugPanel.classList.contains('visible')) {
+    window.yukiAPI.setIgnoreMouse(false)
+  }
+})
 
 // ─── 인라인 채팅 + WS 직접 연결 ─────────────────────────────────
 const chatInput = document.getElementById('chat-input')
@@ -411,6 +799,7 @@ async function connectWS() {
       case 'text_chunk':
         streamText += d.content
         showBubble(streamText)
+        window.yukiAPI.logDump?.('CHUNK_RX', { content: d.content })
         break
       case 'text_done':
         // 6초 후 자동 페이드. 이미 showBubble setTimeout 처리
@@ -421,6 +810,10 @@ async function connectWS() {
         break
       case 'avatar_emotion':
         applyEmotion(d.emotion, d.intensity)
+        break
+      case 'avatar_action':
+        window.yukiAPI.logDump?.('ACTION_RX', { action: d.action, ts: Date.now() })
+        playAction(d.action)
         break
     }
   }
@@ -468,6 +861,141 @@ document.getElementById('btn-mute').addEventListener('click', (e) => {
   muted = !muted
   e.currentTarget.textContent = muted ? '🔇' : '🔊'
 })
+
+// ─── 상시 음성 인식 (Always Listen) ─────────────────────────────
+let listenStream = null
+let listenRecorder = null
+let listenChunks = []
+let listenCtx = null
+let listenAnalyser = null
+let listenRaf = null
+let listenEnabled = false
+let hasVoice = false
+let voiceMs = 0
+let silenceMs = 0
+let lastFrameTs = 0
+
+const VAD_THRESHOLD = 0.025
+const MIN_VOICE_MS = 300
+const SILENCE_END_MS = 800
+
+function buildRecorder() {
+  const rec = new MediaRecorder(listenStream, { mimeType: 'audio/webm' })
+  rec.ondataavailable = (e) => { if (e.data.size > 0) listenChunks.push(e.data) }
+  rec.onstop = async () => {
+    const chunks = listenChunks
+    listenChunks = []
+    if (chunks.length > 0 && hasVoiceSegment) {
+      const blob = new Blob(chunks, { type: 'audio/webm' })
+      const buf = await blob.arrayBuffer()
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'audio_chunk', data: b64, is_final: true, session_id: 'default'
+        }))
+      }
+    }
+    hasVoiceSegment = false
+    if (listenEnabled) {
+      listenRecorder = buildRecorder()
+      listenRecorder.start()
+    }
+  }
+  return rec
+}
+
+let hasVoiceSegment = false
+
+async function startListen() {
+  if (listenEnabled) return
+  try {
+    listenStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    })
+    listenEnabled = true
+    listenRecorder = buildRecorder()
+    listenRecorder.start()
+
+    listenCtx = new AudioContext()
+    const src = listenCtx.createMediaStreamSource(listenStream)
+    listenAnalyser = listenCtx.createAnalyser()
+    listenAnalyser.fftSize = 512
+    src.connect(listenAnalyser)
+    const data = new Uint8Array(listenAnalyser.fftSize)
+    lastFrameTs = performance.now()
+
+    const loop = () => {
+      if (!listenEnabled) return
+      const now = performance.now()
+      const dt = now - lastFrameTs
+      lastFrameTs = now
+      listenAnalyser.getByteTimeDomainData(data)
+      let sum = 0
+      for (let i = 0; i < data.length; i++) { const v = (data[i]-128)/128; sum += v*v }
+      const rms = Math.sqrt(sum / data.length)
+
+      // TTS 재생 중엔 VAD 상태 리셋 (자기 목소리 되먹임 차단)
+      if (isTalking) {
+        hasVoice = false; voiceMs = 0; silenceMs = 0
+        listenRaf = requestAnimationFrame(loop)
+        return
+      }
+
+      if (rms >= VAD_THRESHOLD) {
+        voiceMs += dt; silenceMs = 0
+        if (!hasVoice && voiceMs >= MIN_VOICE_MS) {
+          hasVoice = true
+          hasVoiceSegment = true
+        }
+      } else {
+        silenceMs += dt; voiceMs = 0
+        if (hasVoice && silenceMs >= SILENCE_END_MS) {
+          // 발화 종료 감지
+          hasVoice = false
+          silenceMs = 0
+          if (listenRecorder && listenRecorder.state === 'recording') {
+            listenRecorder.stop()  // triggers onstop → send + restart
+          }
+        }
+      }
+      listenRaf = requestAnimationFrame(loop)
+    }
+    loop()
+    updateMicBtn()
+    dbg('listen ON')
+  } catch (e) {
+    dbg('mic err: ' + e.message)
+    listenEnabled = false
+    updateMicBtn()
+  }
+}
+
+function stopListen() {
+  listenEnabled = false
+  if (listenRaf) cancelAnimationFrame(listenRaf)
+  try { listenRecorder?.stop() } catch {}
+  listenStream?.getTracks().forEach(t => t.stop())
+  try { listenCtx?.close() } catch {}
+  listenStream = null
+  listenRecorder = null
+  listenChunks = []
+  hasVoice = false; voiceMs = 0; silenceMs = 0
+  updateMicBtn()
+}
+
+function updateMicBtn() {
+  const b = document.getElementById('btn-mic')
+  if (b) b.textContent = listenEnabled ? '🎤' : '🔇'
+  if (b) b.style.color = listenEnabled ? '#4ade80' : '#a78bfa'
+}
+
+document.getElementById('btn-mic').addEventListener('click', () => {
+  if (listenEnabled) stopListen()
+  else startListen()
+})
+
+// 기본 시작: WS 연결 + VRM 로드 완료 후 자동 on
+setTimeout(() => { startListen().catch(() => {}) }, 1500)
 </script>
 </body>
 </html>
