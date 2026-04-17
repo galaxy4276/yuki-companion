@@ -1,37 +1,6 @@
-import base64
-import time
-import httpx
-import config
-from core.logging import logger
-from core import events
-from core.events import since_ms
-
-_client = httpx.AsyncClient(
-    timeout=60.0,
-    auth=httpx.BasicAuth(config.TTS_USERNAME, config.TTS_PASSWORD),
-)
 _SENTENCE_END_CHARS = ('.', '!', '?', '。', '？', '！', '…')
 MAX_CHUNK_CHARS = 200
 
-async def synthesize(text: str) -> bytes | None:
-    t0 = time.time()
-    await events.emit("tts.request", {"text": text, "voice": config.TTS_VOICE, "len": len(text)})
-    try:
-        resp = await _client.post(
-            f"{config.TTS_URL}/v1/audio/speech",
-            json={"input": text, "voice": config.TTS_VOICE, "response_format": "wav"},
-        )
-        if resp.status_code == 200:
-            await events.emit("tts.response", {"bytes": len(resp.content), "duration_ms": since_ms(t0), "len": len(text)})
-            return resp.content
-        await events.emit("tts.fail", {"reason": f"HTTP {resp.status_code}", "text": text, "duration_ms": since_ms(t0)})
-    except Exception as e:
-        logger.warning(f"[TTS] 오류: {e}")
-        await events.emit("tts.fail", {"reason": str(e), "text": text, "duration_ms": since_ms(t0)})
-    return None
-
-def to_base64(wav_bytes: bytes) -> str:
-    return base64.b64encode(wav_bytes).decode()
 
 class SentenceChunker:
     """LLM 스트림 청크 누적 + 문장/상한/코드블록 경계에서 flush.
@@ -39,6 +8,7 @@ class SentenceChunker:
     코드블록(```...```) 내부 텍스트는 TTS에서 완전히 제외.
     진입 시 이전까지 누적된 평문을 즉시 flush, 종료 시 내부 텍스트 폐기.
     """
+
     def __init__(self):
         self._parts: list[str] = []
         self.in_code_block = False
@@ -66,7 +36,6 @@ class SentenceChunker:
                 if self.in_code_block:
                     self.in_code_block = False
                 else:
-                    # 진입: 마지막 3개 백틱 제외하고 flush
                     self._parts = self._parts[:-3]
                     flushed = self._flush_outside()
                     if flushed:

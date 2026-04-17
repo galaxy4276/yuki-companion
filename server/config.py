@@ -8,10 +8,18 @@ GEMMA_MAX_TOKENS = 1024
 MCP_TOOL_RESULT_MAX_CHARS = 4000  # LLM에 다시 보낼 때 truncate
 
 # TTS
+TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "elevenlabs")  # qwen | elevenlabs
+
+# Qwen3-TTS (provider=qwen)
 TTS_URL = "http://localhost:8880"
 TTS_USERNAME = os.environ.get("TTS_USERNAME", "tts")
 TTS_PASSWORD = os.environ.get("TTS_PASSWORD", "SmartNewbie!0705")
-TTS_VOICE = os.environ.get("TTS_VOICE", "Ono_Anna")  # 일본 여성 (Sohee는 EOS 미도달로 무한 generation)
+TTS_VOICE = os.environ.get("TTS_VOICE", "Ono_Anna")  # Sohee는 EOS 미도달로 무한 generation
+
+# ElevenLabs (provider=elevenlabs)
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "sk_ea17cd9711839459d5e030ffa2900669b4a63da94df1143f")
+ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")  # Sarah (multilingual)
+ELEVENLABS_MODEL_ID = os.environ.get("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
 
 # STT
 WHISPER_MODEL  = "medium"
