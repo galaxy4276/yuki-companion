@@ -234,9 +234,20 @@ pttBtn.addEventListener('mousedown', startRec)
 pttBtn.addEventListener('mouseup', stopRec)
 
 let vadStream, vadCtx, vadAnalyser, vadRaf, vadStartTime = 0
+let vadSpeechDetected = false
+
+const VAD_SILENCE_MS = 1200        // 문장 간 호흡 허용
+const VAD_MIN_SPEECH_MS = 600      // 최소 발화 길이
+const VAD_GRACE_MS = 400           // 녹음 시작 후 무시 구간
+const VAD_SPEECH_THRESHOLD = 0.035 // 발화 판정 rms
+const VAD_SILENCE_THRESHOLD = 0.018 // 정적 판정 rms (hysteresis)
+const VAD_MAX_DURATION_MS = 30000  // 30초 안전장치
+
 async function startRec() {
   if (isRecording) return
-  isRecording = true; audioChunks = []; vadStartTime = Date.now()
+  isRecording = true; audioChunks = []
+  vadStartTime = Date.now()
+  vadSpeechDetected = false
   pttBtn.classList.add('recording'); pttBtn.textContent = '⏹'
   vadStream = await navigator.mediaDevices.getUserMedia({ audio: true })
   mediaRecorder = new MediaRecorder(vadStream, { mimeType: 'audio/webm' })
@@ -246,10 +257,13 @@ async function startRec() {
   vadCtx = new AudioContext()
   const src = vadCtx.createMediaStreamSource(vadStream)
   vadAnalyser = vadCtx.createAnalyser()
-  vadAnalyser.fftSize = 512
+  vadAnalyser.fftSize = 1024
   src.connect(vadAnalyser)
   const data = new Uint8Array(vadAnalyser.fftSize)
+
+  let speechStart = 0
   let silenceStart = 0
+
   const loop = () => {
     if (!isRecording) return
     vadAnalyser.getByteTimeDomainData(data)
@@ -257,10 +271,25 @@ async function startRec() {
     for (let i = 0; i < data.length; i++) { const v = (data[i]-128)/128; sum += v*v }
     const rms = Math.sqrt(sum / data.length)
     const now = Date.now()
-    if (rms < 0.02) {
+    const elapsed = now - vadStartTime
+
+    if (elapsed > VAD_MAX_DURATION_MS) { stopRec(); return }
+
+    if (elapsed < VAD_GRACE_MS) {
+      vadRaf = requestAnimationFrame(loop); return
+    }
+
+    if (rms > VAD_SPEECH_THRESHOLD) {
+      if (!vadSpeechDetected) { vadSpeechDetected = true; speechStart = now }
+      silenceStart = 0
+    } else if (rms < VAD_SILENCE_THRESHOLD) {
       if (silenceStart === 0) silenceStart = now
-      if (now - silenceStart > 800 && now - vadStartTime > 500) { stopRec(); return }
-    } else { silenceStart = 0 }
+      const silenceDur = now - silenceStart
+      const speechDur = vadSpeechDetected ? now - speechStart : 0
+      if (vadSpeechDetected && speechDur > VAD_MIN_SPEECH_MS && silenceDur > VAD_SILENCE_MS) {
+        stopRec(); return
+      }
+    }
     vadRaf = requestAnimationFrame(loop)
   }
   loop()
@@ -272,13 +301,24 @@ async function stopRec() {
   if (vadRaf) cancelAnimationFrame(vadRaf)
   try { vadCtx?.close() } catch {}
   pttBtn.classList.remove('recording'); pttBtn.textContent = '🎤'
+
+  const recordedDuration = Date.now() - vadStartTime
   mediaRecorder.stop()
   mediaRecorder.stream.getTracks().forEach(t => t.stop())
   await new Promise(r => mediaRecorder.onstop = r)
+
+  // 발화 미감지 or 너무 짧음 → 전송 스킵
+  if (!vadSpeechDetected || recordedDuration < VAD_MIN_SPEECH_MS) {
+    document.getElementById('stt-hint').textContent = '음성 감지 안 됨'
+    setTimeout(() => document.getElementById('stt-hint').textContent = '', 2000)
+    return
+  }
+
   const blob = new Blob(audioChunks, { type: 'audio/webm' })
   const buf = await blob.arrayBuffer()
   const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
   send({ type: 'audio_chunk', data: b64, is_final: true })
+  document.getElementById('stt-hint').textContent = '인식 중...'
 }
 
 document.getElementById('close-btn').onclick = () => window.yukiAPI.hideChat()
