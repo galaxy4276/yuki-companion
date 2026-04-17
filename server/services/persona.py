@@ -44,7 +44,7 @@ def build_system_prompt(context: dict) -> str:
         ctx_str = "특별한 상황 없음."
     template = _persona.get("system_prompt", "너는 {name}이야.")
     return template.format(
-        name=_persona.get("name", "유키"),
+        name=_persona.get("name", "뉴끼"),
         personality=_persona.get("personality", ""),
         speech_style=_persona.get("speech_style", ""),
         context=ctx_str,

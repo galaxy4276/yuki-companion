@@ -78,7 +78,7 @@ function createChatWindow() {
 function createTray() {
   const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'tray.png'))
   tray = new Tray(icon)
-  tray.setToolTip('유키 AI 동반자')
+  tray.setToolTip('뉴끼 AI 공용 비서')
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '채팅 창 열기',  click: () => chatWin?.show() },
     { label: '채팅 창 닫기',  click: () => chatWin?.hide() },

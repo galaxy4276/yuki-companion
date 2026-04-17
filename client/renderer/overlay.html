@@ -221,7 +221,7 @@
 <div id="chat-bar">
   <span id="ws-dot" title="연결 상태"></span>
   <div id="mic-meter" title="마이크 레벨 (주황=음성감지)"><div id="mic-meter-bar"></div></div>
-  <input id="chat-input" type="text" placeholder="유키에게 말 걸기..." autocomplete="off" />
+  <input id="chat-input" type="text" placeholder="뉴끼에게 말 걸기..." autocomplete="off" />
   <button id="chat-send">▶</button>
 </div>
 
@@ -287,6 +287,15 @@ let talkTimer  = 0
 let tongueBones = []      // 탐지된 tongue 본 리스트
 let tongueRestRot = []    // 원위치 저장
 const MOUTH_VOWELS = ['aa', 'ih', 'ou', 'ee', 'oh']
+
+// ─── idle 광기 애니메이션 (혀 5종 + 헤드뱅잉 3종) ────────────────
+// 0-4: tongue crazy, 5-7: headbang 360°
+let idleCrazeActive   = false
+let idleCrazeType     = 0
+let idleCrazeStart    = 0
+let idleCrazeDuration = 0
+let idleCrazeNextAt   = 3 + Math.random() * 6
+let headRestRot       = null   // headbang 종료 후 복귀용
 
 // ─── 포즈 프리셋 (단위: 도) — 토끼 모델용 ─────────────────────
 // 앞다리 = Arm(humanoid), 뒷다리 = Leg, 귀 = mimi_L/R_01~03, 꼬리 = sita_01~03
@@ -618,6 +627,88 @@ function useCSSAvatar() {
   document.head.appendChild(style)
 }
 
+// ─── idle 광기: 혀 5종 + 헤드뱅잉 3종 ─────────────────────────
+// type 0-4: 혀 / type 5-7: 헤드뱅잉 360°
+function runIdleCraze(type, lt, dur) {
+  const em = currentVrm?.expressionManager
+  const deg = THREE.MathUtils.degToRad
+
+  // 혀 패턴: 입 크게 벌리고 혀 본 흔들기
+  if (type <= 4) {
+    if (em) {
+      // 혀 안 보이면 'aa' 입만 크게
+      em.setValue('aa', 0.9)
+      for (const v of ['ih','ou','ee','oh']) em.setValue(v, 0)
+    }
+    if (tongueBones.length === 0) return
+    for (let i = 0; i < tongueBones.length; i++) {
+      const b = tongueBones[i]
+      const r = tongueRestRot[i]
+      const seg = i * 0.6
+      let rx, ry, rz
+      switch (type) {
+        case 0: // 발작 떨기 (고주파 랜덤)
+          rx = Math.sin(lt * 38 + seg) * deg(45)
+          ry = Math.sin(lt * 42 + seg * 1.3) * deg(55)
+          rz = Math.sin(lt * 36 + seg * 1.7) * deg(35)
+          break
+        case 1: // 원형 회전 (둘둘말이)
+          rx = Math.sin(lt * 14 + seg) * deg(50)
+          ry = Math.cos(lt * 14 + seg) * deg(50)
+          rz = lt * 6 // 계속 감김
+          break
+        case 2: // 8자 (figure-8)
+          rx = Math.sin(lt * 10 + seg) * deg(40)
+          ry = Math.sin(lt * 20 + seg) * deg(60)
+          rz = Math.sin(lt * 10 + seg + 1.0) * deg(25)
+          break
+        case 3: { // 채찍질 (빠른 sawtooth)
+          const saw = ((lt * 8 + seg) % 1) * 2 - 1
+          rx = saw * deg(60)
+          ry = Math.sin(lt * 25 + seg) * deg(50)
+          rz = Math.sin(lt * 18) * deg(30)
+          break
+        }
+        case 4: // 술취함 (느리고 무거운 스윙)
+          rx = Math.sin(lt * 4 + seg) * deg(35) + Math.sin(lt * 11) * deg(15)
+          ry = Math.sin(lt * 3.5 + seg * 2) * deg(70)
+          rz = Math.sin(lt * 2.5 + seg) * deg(40)
+          break
+      }
+      b.rotation.set(r[0] + rx, r[1] + ry, r[2] + rz)
+    }
+    return
+  }
+
+  // 헤드뱅잉 360°
+  const head = getBone('head')
+  const neck = getBone('neck')
+  if (!head) return
+  const rest = headRestRot || [0, 0, 0]
+  // 시작/끝 구간 감속 (easing)
+  const t01 = lt / dur
+  const env = Math.sin(t01 * Math.PI)  // 0→1→0
+  const spin = lt * 18 * env           // 회전 속도 엔벨로프 적용
+  switch (type) {
+    case 5: // Y축 360° (좌우 회오리)
+      head.rotation.set(rest[0], rest[1] + spin, rest[2])
+      if (neck) neck.rotation.y = Math.sin(lt * 18) * deg(20) * env
+      break
+    case 6: // X축 360° (앞뒤 끄덕 폭주)
+      head.rotation.set(rest[0] + spin, rest[1], rest[2] + Math.sin(lt * 30) * deg(15) * env)
+      if (neck) neck.rotation.x = Math.sin(lt * 22) * deg(25) * env
+      break
+    case 7: // Z축 360° + 살짝 기울어짐 (롤 회오리)
+      head.rotation.set(
+        rest[0] + Math.sin(lt * 14) * deg(20) * env,
+        rest[1] + Math.sin(lt * 11) * deg(35) * env,
+        rest[2] + spin,
+      )
+      if (neck) neck.rotation.z = Math.sin(lt * 12) * deg(15) * env
+      break
+  }
+}
+
 // ─── 애니메이션 루프 ─────────────────────────────────────────────
 function animate() {
   requestAnimationFrame(animate)
@@ -693,13 +784,52 @@ function animate() {
           b.rotation.z = rest[2] + Math.sin(talkTimer * 22 + segPhase + 1.0) * zAmp
         }
       }
-    } else if (currentVrm.expressionManager) {
+    } else if (currentVrm.expressionManager && !idleCrazeActive) {
       for (const v of MOUTH_VOWELS) currentVrm.expressionManager.setValue(v, 0)
       // 혓바닥 원위치 복귀
       if (tongueBones.length > 0) {
         for (let i = 0; i < tongueBones.length; i++) {
           const rest = tongueRestRot[i]
           tongueBones[i].rotation.set(rest[0], rest[1], rest[2])
+        }
+      }
+    }
+
+    // ─── idle 광기 트리거 & 실행 ────────────────────────────────
+    if (currentPoseName === 'idle' && poseProgress >= 1 && !isTalking) {
+      if (!idleCrazeActive && t >= idleCrazeNextAt) {
+        idleCrazeActive   = true
+        idleCrazeType     = Math.floor(Math.random() * 8) // 0-4 혀, 5-7 헤드뱅잉
+        idleCrazeStart    = t
+        idleCrazeDuration = 1.2 + Math.random() * 2.4
+        // 헤드뱅잉 시작 시 현재 head rotation 저장
+        if (idleCrazeType >= 5) {
+          const head = getBone('head')
+          if (head) headRestRot = [head.rotation.x, head.rotation.y, head.rotation.z]
+        }
+      }
+      if (idleCrazeActive) {
+        const lt = t - idleCrazeStart
+        if (lt >= idleCrazeDuration) {
+          idleCrazeActive = false
+          idleCrazeNextAt = t + 2.5 + Math.random() * 7.5
+          // 복귀
+          if (currentVrm.expressionManager) {
+            for (const v of MOUTH_VOWELS) currentVrm.expressionManager.setValue(v, 0)
+          }
+          if (tongueBones.length > 0) {
+            for (let i = 0; i < tongueBones.length; i++) {
+              const rest = tongueRestRot[i]
+              tongueBones[i].rotation.set(rest[0], rest[1], rest[2])
+            }
+          }
+          if (headRestRot) {
+            const head = getBone('head')
+            if (head) head.rotation.set(headRestRot[0], headRestRot[1], headRestRot[2])
+            headRestRot = null
+          }
+        } else {
+          runIdleCraze(idleCrazeType, lt, idleCrazeDuration)
         }
       }
     }

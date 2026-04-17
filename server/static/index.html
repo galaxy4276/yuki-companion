@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>유키 — AI 코딩 동반자</title>
+  <title>뉴끼 — AI 공용 비서</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -218,7 +218,7 @@
 
 <header>
   <div class="status-dot" id="conn-dot"></div>
-  <h1>유키 AI</h1>
+  <h1>뉴끼 AI</h1>
   <span class="subtitle" id="status-text">연결 중...</span>
 </header>
 
@@ -227,7 +227,7 @@
     <div id="avatar-wrap">
       <div class="avatar" id="avatar">🧝‍♀️</div>
     </div>
-    <div id="persona-name">유키</div>
+    <div id="persona-name">뉴끼</div>
     <div id="emotion-label">idle</div>
   </div>
 
@@ -236,7 +236,7 @@
     <div id="stt-preview"></div>
     <div id="input-area">
       <button class="btn" id="ptt-btn" title="꾹 눌러서 말하기">🎤</button>
-      <textarea id="text-input" rows="1" placeholder="유키에게 말하기... (Enter 전송)"></textarea>
+      <textarea id="text-input" rows="1" placeholder="뉴끼에게 말하기... (Enter 전송)"></textarea>
       <button class="btn" id="send-btn">전송</button>
     </div>
   </div>
@@ -256,7 +256,7 @@ function connect() {
   ws.onopen = () => {
     document.getElementById("conn-dot").style.background = "#4caf50";
     document.getElementById("status-text").textContent = "연결됨";
-    addMessage("system", "유키와 연결됐어! 뭐든 물어봐 😊");
+    addMessage("system", "뉴끼 등장! 뭐든 물어봐 가자!");
   };
 
   ws.onclose = () => {
