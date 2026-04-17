@@ -14,6 +14,8 @@ import services.tts as tts
 import services.persona as persona
 from services import mcp_client
 from services import vision
+from services.memory.store import MemoryStore
+from services.memory.wiki import WikiStore
 import core.context as ctx
 from core.logging import logger
 from core import events
@@ -22,6 +24,10 @@ from core.events import since_ms
 _broadcaster: Callable[[dict], Awaitable[None]] | None = None
 _tasks: set[asyncio.Task] = set()
 _recent_cmds: deque = deque(maxlen=config.RECENT_CMD_RING_SIZE)
+
+# LTM singletons — bootstrap은 main.lifespan 에서 이미 수행됨
+_memory = MemoryStore(config.YUKI_MEMORY_DIR)
+_wiki = WikiStore(config.YUKI_WIKI_DIR)
 
 
 _templates_cache: dict = {"mtime": 0.0, "data": None}
@@ -131,7 +137,10 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     t0 = time.time()
     await events.emit("msg.start", {"content": content, "session_id": session_id, "event_type": event_type, "msg_id": msg_id})
 
-    system_prompt = persona.build_system_prompt(ctx.get())
+    _mem_body = _memory.load_memory()
+    _eps = _memory.load_recent_episode(k=1)
+    recent_memory = _mem_body + ("\n\n[최근 세션]\n" + "\n---\n".join(_eps) if _eps else "")
+    system_prompt = persona.build_system_prompt(ctx.get(), recent_memory=recent_memory)
 
     recent, summary, tools = await asyncio.gather(
         history.get_recent(session_id, limit=config.HISTORY_ROLLING_TURNS),

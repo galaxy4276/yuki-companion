@@ -20,6 +20,11 @@ async def lifespan(app: FastAPI):
     events.init(os.path.join(os.path.dirname(__file__), "logs"))
     await init_db()
     persona.load_persona()
+    # LTM 부트스트랩 — 디렉토리/시드 파일 보장 (best-effort)
+    from services.memory.store import MemoryStore
+    from services.memory.wiki import WikiStore
+    MemoryStore(config.YUKI_MEMORY_DIR).bootstrap()
+    WikiStore(config.YUKI_WIKI_DIR).bootstrap()
     load_whisper()
     asyncio.create_task(proactive.run())
     asyncio.create_task(persona.watch_persona())

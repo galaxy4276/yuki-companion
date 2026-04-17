@@ -33,8 +33,14 @@ PORT = 8002
 # DB
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "companion.db")
 
-# Persona
-PERSONA_PATH = os.path.join(os.path.dirname(__file__), "data", "personas", "default.json")
+# Yuki data roots (persona v2 + LTM)
+YUKI_DATA_DIR = os.path.join(os.path.dirname(__file__), "data", "yuki")
+YUKI_MEMORY_DIR = os.path.join(YUKI_DATA_DIR, "memory")
+YUKI_WIKI_DIR = os.path.join(YUKI_DATA_DIR, "wiki")
+YUKI_RAW_DIR = os.path.join(YUKI_DATA_DIR, "raw")
+
+# Persona — v2 MD (frontmatter). data/personas/default.json 는 deprecated fallback.
+PERSONA_PATH = os.path.join(YUKI_DATA_DIR, "persona", "default.md")
 
 # Proactive triggers
 IDLE_TRIGGER_MINUTES  = 30

@@ -5,6 +5,12 @@ import asyncio
 import config
 from core.logging import logger
 
+try:
+    import frontmatter as _frontmatter
+except ImportError as _e:
+    _frontmatter = None
+    logger.warning(f"[Persona] python-frontmatter 미설치, MD 로더 비활성 — JSON fallback만 사용 ({_e})")
+
 _persona: dict = {}
 _loaded_mtime: float = 0.0
 
@@ -14,9 +20,17 @@ _ACTION_RE = re.compile(r"\[action:(\w+)\]")
 
 def load_persona():
     global _persona, _loaded_mtime
-    with open(config.PERSONA_PATH, encoding="utf-8") as f:
-        _persona = json.load(f)
-    _loaded_mtime = os.path.getmtime(config.PERSONA_PATH)
+    path = config.PERSONA_PATH
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".md" and _frontmatter is not None:
+        post = _frontmatter.load(path)
+        _persona = {**post.metadata, "system_prompt": post.content}
+    else:
+        if ext == ".md" and _frontmatter is None:
+            logger.warning(f"[Persona] .md 지정됐지만 frontmatter 미설치, JSON 로더로 시도")
+        with open(path, encoding="utf-8") as f:
+            _persona = json.load(f)
+    _loaded_mtime = os.path.getmtime(path)
     logger.info(f"[Persona] 로드 완료: {_persona.get('name')}")
 
 async def watch_persona():
@@ -29,7 +43,7 @@ async def watch_persona():
         except Exception as e:
             logger.warning(f"[Persona] watch 오류: {e}")
 
-def build_system_prompt(context: dict) -> str:
+def build_system_prompt(context: dict, recent_memory: str = "") -> str:
     ctx_str = ""
     if context.get("cwd"):
         ctx_str += f"현재 작업 디렉토리: {context['cwd']}. "
@@ -42,13 +56,28 @@ def build_system_prompt(context: dict) -> str:
         ctx_str += f"Claude Code 작업: {context['claude_task']}. "
     if not ctx_str:
         ctx_str = "특별한 상황 없음."
+
+    mem_str = recent_memory if recent_memory else "(없음)"
+
     template = _persona.get("system_prompt", "너는 {name}이야.")
-    return template.format(
+    fmt_kwargs = dict(
         name=_persona.get("name", "뉴끼"),
         personality=_persona.get("personality", ""),
         speech_style=_persona.get("speech_style", ""),
         context=ctx_str,
+        recent_memory=mem_str,
     )
+    try:
+        return template.format(**fmt_kwargs)
+    except KeyError:
+        # 템플릿에 {recent_memory} 가 없는 경우 안전 fallback — 끝에 덧붙임
+        fmt_kwargs.pop("recent_memory", None)
+        try:
+            rendered = template.format(**fmt_kwargs)
+        except Exception as e:
+            logger.warning(f"[Persona] template format 실패: {e}")
+            rendered = template
+        return rendered + f"\n\n최근 기억:\n{mem_str}\n"
 
 def get_persona() -> dict:
     return _persona
