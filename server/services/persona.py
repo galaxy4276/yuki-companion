@@ -8,7 +8,8 @@ from core.logging import logger
 _persona: dict = {}
 _loaded_mtime: float = 0.0
 
-ACTIONS = ("idle", "wave", "think", "cheer", "shrug", "point", "nod", "bow")
+ACTIONS = ("idle", "perk", "droop", "tilt", "wave", "think", "cheer", "shrug", "point", "nod", "bow", "wag")
+EXPRESSIVE_ACTIONS = ("wave", "cheer", "wag", "point", "nod", "bow", "perk", "droop", "shrug", "tilt", "think")
 _ACTION_RE = re.compile(r"\[action:(\w+)\]")
 
 def load_persona():
@@ -71,8 +72,8 @@ def extract_action(text: str) -> tuple[str, str | None]:
             return cleaned, name
         return cleaned, None
     emotion, _ = classify_emotion(text)
-    fallback = {"happy": "cheer", "worried": "shrug", "thinking": "think",
-                "surprised": "nod", "idle": "idle"}.get(emotion)
+    fallback = {"happy": "wag", "worried": "droop", "thinking": "think",
+                "surprised": "perk", "idle": "idle"}.get(emotion)
     return text, fallback
 
 
