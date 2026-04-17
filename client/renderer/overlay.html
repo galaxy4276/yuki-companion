@@ -801,6 +801,10 @@ async function drainAudioQueue() {
   isTalking = false
   talkTimer = 0
   if (window._talkAnim) window._talkAnim(false)
+  if (listenCtx?.state === 'suspended') {
+    listenCtx.resume().then(() => console.log('[VAD] listenCtx resumed (post-TTS)')).catch(()=>{})
+  }
+  console.log('[VAD] TTS drain done, isTalking=false')
 }
 
 function playAudio(b64) {
@@ -964,9 +968,13 @@ const VOICE_HANGOVER_MS = 250  // silence 동안 voiceMs 유지 (자음 사이 g
 function buildRecorder() {
   const rec = new MediaRecorder(listenStream, { mimeType: 'audio/webm' })
   rec.ondataavailable = (e) => { if (e.data.size > 0) listenChunks.push(e.data) }
+  rec.onerror = (e) => console.error('[VAD] recorder error:', e.error)
   rec.onstop = async () => {
     const chunks = listenChunks
     listenChunks = []
+    const tracks = listenStream?.getTracks() || []
+    const trackStates = tracks.map(t => `${t.kind}:${t.readyState}:${t.muted?'muted':'live'}`).join(',')
+    console.log('[VAD] onstop chunks:', chunks.length, 'hasSeg:', hasVoiceSegment, 'enabled:', listenEnabled, 'tracks:', trackStates)
     if (chunks.length > 0 && hasVoiceSegment) {
       const blob = new Blob(chunks, { type: 'audio/webm' })
       const buf = await blob.arrayBuffer()
@@ -975,18 +983,51 @@ function buildRecorder() {
         ws.send(JSON.stringify({
           type: 'audio_chunk', data: b64, is_final: true, session_id: 'default'
         }))
+        console.log('[VAD] audio_chunk sent', buf.byteLength, 'bytes')
+      } else {
+        console.warn('[VAD] WS not open, dropped')
       }
     }
     hasVoiceSegment = false
     if (listenEnabled) {
-      listenRecorder = buildRecorder()
-      listenRecorder.start()
+      try {
+        if (listenCtx?.state === 'suspended') {
+          await listenCtx.resume()
+          console.log('[VAD] listenCtx resumed')
+        }
+        const liveTrack = tracks.find(t => t.kind === 'audio' && t.readyState === 'live')
+        if (!liveTrack) {
+          console.warn('[VAD] no live audio track — re-acquiring stream')
+          listenStream?.getTracks().forEach(t => t.stop())
+          listenStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          })
+        }
+        listenRecorder = buildRecorder()
+        listenRecorder.start()
+        console.log('[VAD] new recorder started, state:', listenRecorder.state)
+      } catch (e) {
+        console.error('[VAD] recorder restart failed:', e)
+        setVoiceBadge(null, '마이크 재시작 실패', 4000)
+      }
     }
   }
   return rec
 }
 
 let hasVoiceSegment = false
+let _vadLastTick = 0
+setInterval(() => {
+  if (!listenEnabled) return
+  const since = performance.now() - _vadLastTick
+  if (since > 3000) {
+    console.warn('[VAD] watchdog: loop stalled', Math.round(since), 'ms — restarting')
+    if (listenRaf) cancelAnimationFrame(listenRaf)
+    listenEnabled = false
+    stopListen()
+    setTimeout(() => startListen().catch(e => console.error('[VAD] restart err:', e)), 500)
+  }
+}, 2000)
 
 async function startListen() {
   if (listenEnabled) return
@@ -1029,6 +1070,7 @@ async function startListen() {
           hasVoice = true
           hasVoiceSegment = true
           setVoiceBadge('recording', '듣는 중')
+          console.log('[VAD] voice START rms=', rms.toFixed(3), 'recState=', listenRecorder?.state)
         }
       } else {
         silenceMs += dt
@@ -1036,13 +1078,17 @@ async function startListen() {
         if (hasVoice && silenceMs >= SILENCE_END_MS) {
           hasVoice = false
           silenceMs = 0
+          console.log('[VAD] voice END recState=', listenRecorder?.state)
           if (listenRecorder && listenRecorder.state === 'recording') {
             setVoiceBadge('processing', '인식 중...')
             listenRecorder.stop()
+          } else {
+            console.warn('[VAD] silence end but recorder not recording, state=', listenRecorder?.state)
           }
         }
       }
       updateMicMeter(rms, hasVoice)
+      _vadLastTick = performance.now()
       listenRaf = requestAnimationFrame(loop)
     }
     loop()
