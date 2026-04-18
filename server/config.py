@@ -12,7 +12,7 @@ RECENT_MEMORY_MAX_CHARS = 600
 EPISODE_MAX_CHARS = 300
 
 # TTS
-TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "elevenlabs")  # qwen | elevenlabs
+TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "qwen")  # qwen | elevenlabs
 
 # Qwen3-TTS (provider=qwen)
 TTS_URL = "http://localhost:8880"
