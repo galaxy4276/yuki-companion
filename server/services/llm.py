@@ -34,13 +34,14 @@ def _sanitize_messages(messages):
     return out
 
 
-async def stream_response(messages: list[dict], tools: list[dict] | None = None):
+async def stream_response(messages: list[dict], tools: list[dict] | None = None,
+                          max_tokens: int | None = None):
     """Gemma 4 스트리밍. (content chunk, is_final) yield. tools 전달 시 function-calling 지원."""
     client = get_client()
     kwargs = dict(
         model=config.GEMMA_MODEL,
         messages=messages,
-        max_tokens=config.GEMMA_MAX_TOKENS,
+        max_tokens=max_tokens if max_tokens is not None else config.GEMMA_MAX_TOKENS,
         stream=True,
     )
     if tools:
