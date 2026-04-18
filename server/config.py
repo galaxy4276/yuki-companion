@@ -93,3 +93,15 @@ MCP_TOOL_TIMEOUTS = {
     "ask_marketing_mentor": 180,
 }
 MCP_ENABLED = bool(MCP_BEARER_TOKEN)
+
+# --- Proactive metric questions ---
+PROACTIVE_METRIC_ENABLED = os.getenv("PROACTIVE_METRIC_ENABLED", "false").lower() == "true"
+PROACTIVE_METRIC_POLL_SECONDS = 300  # 5분 (proactive.run은 300s 루프 내에서 호출)
+PROACTIVE_METRIC_TOPIC_THROTTLE_SECONDS = 1800  # 30분
+PROACTIVE_METRIC_DELTA_PCT = 10.0  # 10% 이상 변동
+PROACTIVE_METRIC_BUCKET_PCT = 10.0  # topic hash quantize bucket
+PROACTIVE_METRIC_PER_TOOL_TIMEOUT = 30.0  # per-tool gather cap (ask_sometime 180s 우회)
+PROACTIVE_METRIC_MAX_TOKENS = 80  # 1-2문장 강제
+PROACTIVE_METRIC_TOOLS = ["get_revenue", "get_gem_stats", "get_metric"]  # ask_sometime 제외 (anti-pattern)
+PROACTIVE_METRIC_SKIP_IF_NO_CLIENT = True
+PROACTIVE_GLOBAL_MAX_PER_HOUR = 2  # anti-annoyance rate limit

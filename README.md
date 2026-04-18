@@ -180,6 +180,32 @@ yuki-companion/
 
 ---
 
+## Proactive Metric Questions (Beta)
+
+뉴끼가 sometimes-central 지표 변동을 감지해 먼저 질문하는 기능 (Phase 1, MVP).
+
+### 활성화
+```bash
+export PROACTIVE_METRIC_ENABLED=true
+```
+
+### 튜닝 (`server/config.py`)
+- `PROACTIVE_METRIC_POLL_SECONDS` — 폴링 주기 (기본 300s)
+- `PROACTIVE_METRIC_DELTA_PCT` — 변동 임계치 (기본 10%)
+- `PROACTIVE_METRIC_TOPIC_THROTTLE_SECONDS` — 주제 쿨다운 (기본 1800s)
+- `PROACTIVE_GLOBAL_MAX_PER_HOUR` — 시간당 최대 발화 (기본 2회)
+- `PROACTIVE_METRIC_TOOLS` — 대상 MCP 도구 (기본: `get_revenue`, `get_gem_stats`, `get_metric`)
+
+### 운영 지침
+- 첫 기동: baseline만 기록 (발화 없음)
+- WS 미접속 시 스킵 (무의미한 LLM/TTS 비용 방지)
+- 2주 연속 응답율 < 20%면 `PROACTIVE_METRIC_ENABLED=false`로 회귀
+
+### Phase 2 (스크린 VLM) — 미구현
+llama.cpp vision 지원 검증 후 진행. 별도 플랜.
+
+---
+
 ## License
 
 MIT © [galaxy4276](https://github.com/galaxy4276)

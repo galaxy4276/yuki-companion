@@ -162,6 +162,7 @@ async def _emit_text_only(msg: str, msg_id: str):
 
 async def handle_message(content: str, session_id: str, event_type: str = "text"):
     msg_id = str(uuid.uuid4())[:8]
+    is_proactive = event_type.startswith("proactive_")
 
     await history.save_message(session_id, "user", content, event_type)
     ctx.touch()
@@ -191,14 +192,15 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     messages.extend(recent)
 
     messages = vision.prepare(messages)
-    if tools and _needs_tools(content):
+    if tools and not is_proactive and _needs_tools(content):
         t_tl = time.time()
         messages = await _tool_loop(messages, tools)
         waypoints["tool_loop_ms"] = since_ms(t_tl)
     else:
         waypoints["tool_loop_ms"] = 0
         if tools:
-            await events.emit("tool_loop.skip", {"reason": "chitchat", "content_len": len(content)})
+            reason = "proactive" if is_proactive else "chitchat"
+            await events.emit("tool_loop.skip", {"reason": reason, "content_len": len(content)})
 
     await _send_emotion("thinking", 0.7)
 
@@ -208,7 +210,8 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     stripper = persona.ActionTagStripper()
     action_sent = False
 
-    async for chunk, is_final in llm.stream_response(messages):
+    max_tokens_override = config.PROACTIVE_METRIC_MAX_TOKENS if is_proactive else None
+    async for chunk, is_final in llm.stream_response(messages, max_tokens=max_tokens_override):
         if not is_final:
             cleaned = stripper.feed(chunk)
             if not action_sent and stripper.action:

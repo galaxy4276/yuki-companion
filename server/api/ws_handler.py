@@ -13,6 +13,10 @@ _connections: set[WebSocket] = set()
 _audio_buffers: dict[str, list[bytes]] = {}
 _tasks: set[asyncio.Task] = set()
 
+
+def has_active_clients() -> bool:
+    return len(_connections) > 0
+
 def _track(coro) -> asyncio.Task:
     task = asyncio.create_task(coro)
     _tasks.add(task)

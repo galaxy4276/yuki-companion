@@ -45,7 +45,15 @@ async def init_db():
             turn_range TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS proactive_state (
+            topic TEXT PRIMARY KEY,
+            tool_name TEXT NOT NULL,
+            last_value TEXT,
+            last_triggered_at TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(session_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_summary_session ON summaries(session_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_proactive_tool ON proactive_state(tool_name);
     """)
     await db.commit()
