@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import hashlib
 import json
+import math
 import re
 import time
 import config
@@ -70,13 +71,18 @@ def _extract_numeric(raw: str) -> float | None:
 
 
 def _topic_hash(tool_name: str, raw_value: str, bucket_pct: float) -> str:
-    """Same bucket → same hash. bucket_pct is 10 → quantize to nearest 10% magnitude."""
+    """Same bucket → same hash. bucket_pct=10 → quantize by order-of-magnitude × pct.
+
+    Reference magnitude = 10^floor(log10(|n|)) so values within same order-of-magnitude
+    bucket to the same step (stable across nearby values, unlike value-dependent mag).
+    """
     n = _extract_numeric(raw_value)
-    if n is None:
+    if n is None or n == 0:
         key = f"{tool_name}:{raw_value}"
     else:
-        mag = abs(n) * (bucket_pct / 100.0) or 1.0
-        bucketed = round(n / mag) * mag
+        oom = 10 ** math.floor(math.log10(abs(n)))
+        step = oom * (bucket_pct / 100.0) or 1.0
+        bucketed = round(n / step) * step
         key = f"{tool_name}:{bucketed:.4f}"
     return hashlib.sha1(key.encode()).hexdigest()[:16]
 
