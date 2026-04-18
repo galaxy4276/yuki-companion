@@ -46,6 +46,7 @@ async def stream_response(messages: list[dict], tools: list[dict] | None = None)
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
+    kwargs["extra_body"] = {"cache_prompt": True}
 
     t0 = time.time()
     await events.emit("llm.request", {"messages": _sanitize_messages(messages), "tools_count": len(tools) if tools else 0, "model": config.GEMMA_MODEL, "stream": True})
@@ -87,6 +88,7 @@ async def complete_once(messages: list[dict]) -> str:
     client = get_client()
     resp = await client.chat.completions.create(
         model=config.GEMMA_MODEL, messages=messages, max_tokens=config.GEMMA_MAX_TOKENS,
+        extra_body={"cache_prompt": True},
     )
     return resp.choices[0].message.content or ""
 
@@ -102,6 +104,7 @@ async def complete_with_tools(messages: list[dict], tools: list[dict]) -> dict:
         resp = await client.chat.completions.create(
             model=config.GEMMA_MODEL, messages=messages,
             max_tokens=config.GEMMA_MAX_TOKENS, tools=tools, tool_choice="auto",
+            extra_body={"cache_prompt": True},
         )
     except Exception as e:
         await events.emit("llm.fail", {"reason": str(e)})

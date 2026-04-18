@@ -174,7 +174,6 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     _eps = _memory.load_recent_episode(k=1)
     _eps = [e[:config.EPISODE_MAX_CHARS] for e in _eps]
     recent_memory = _mem_body + ("\n\n[최근 세션]\n" + "\n---\n".join(_eps) if _eps else "")
-    system_prompt = persona.build_system_prompt(ctx.get(), recent_memory=recent_memory)
 
     recent, summary, mcp_tools = await asyncio.gather(
         history.get_recent(session_id, limit=config.HISTORY_ROLLING_TURNS),
@@ -183,7 +182,10 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     )
     tools = (mcp_tools or []) + mem_tools.list_tools()
 
-    messages = [{"role": "system", "content": system_prompt}]
+    messages = [
+        {"role": "system", "content": persona.build_static_prefix()},
+        {"role": "system", "content": persona.build_dynamic_suffix(ctx.get(), recent_memory)},
+    ]
     if summary:
         messages.append({"role": "system", "content": f"이전 대화 요약: {summary}"})
     messages.extend(recent)

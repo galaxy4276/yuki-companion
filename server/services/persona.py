@@ -13,13 +13,15 @@ except ImportError as _e:
 
 _persona: dict = {}
 _loaded_mtime: float = 0.0
+_static_prefix_cache: str | None = None
+_static_prefix_mtime: float = 0.0
 
 ACTIONS = ("idle", "perk", "droop", "tilt", "wave", "think", "cheer", "shrug", "point", "nod", "bow", "wag")
 EXPRESSIVE_ACTIONS = ("wave", "cheer", "wag", "point", "nod", "bow", "perk", "droop", "shrug", "tilt", "think")
 _ACTION_RE = re.compile(r"\[action:(\w+)\]")
 
 def load_persona():
-    global _persona, _loaded_mtime
+    global _persona, _loaded_mtime, _static_prefix_cache
     path = config.PERSONA_PATH
     ext = os.path.splitext(path)[1].lower()
     if ext == ".md" and _frontmatter is not None:
@@ -31,6 +33,7 @@ def load_persona():
         with open(path, encoding="utf-8") as f:
             _persona = json.load(f)
     _loaded_mtime = os.path.getmtime(path)
+    _static_prefix_cache = None  # invalidate on reload
     logger.info(f"[Persona] 로드 완료: {_persona.get('name')}")
 
 async def watch_persona():
@@ -43,7 +46,10 @@ async def watch_persona():
         except Exception as e:
             logger.warning(f"[Persona] watch 오류: {e}")
 
-def build_system_prompt(context: dict, recent_memory: str = "") -> str:
+_DYNAMIC_MARKER = "지금 상황:"
+
+
+def _build_ctx_str(context: dict) -> str:
     ctx_str = ""
     if context.get("cwd"):
         ctx_str += f"현재 작업 디렉토리: {context['cwd']}. "
@@ -56,28 +62,63 @@ def build_system_prompt(context: dict, recent_memory: str = "") -> str:
         ctx_str += f"Claude Code 작업: {context['claude_task']}. "
     if not ctx_str:
         ctx_str = "특별한 상황 없음."
+    return ctx_str
 
-    mem_str = recent_memory if recent_memory else "(없음)"
 
+def _split_template() -> tuple[str, str]:
+    """Split persona system_prompt into (prefix_before_marker, suffix_with_marker)."""
     template = _persona.get("system_prompt", "너는 {name}이야.")
-    fmt_kwargs = dict(
-        name=_persona.get("name", "뉴끼"),
-        personality=_persona.get("personality", ""),
-        speech_style=_persona.get("speech_style", ""),
-        context=ctx_str,
-        recent_memory=mem_str,
-    )
+    idx = template.find(_DYNAMIC_MARKER)
+    if idx < 0:
+        # No marker → entire template is static prefix; dynamic suffix is empty
+        return template, ""
+    prefix = template[:idx].rstrip()
+    suffix = template[idx:]
+    return prefix, suffix
+
+
+def build_static_prefix() -> str:
+    """Static part of system prompt (name/personality/speech_style only). Cached across turns."""
+    global _static_prefix_cache, _static_prefix_mtime
+    if _static_prefix_cache is not None and _static_prefix_mtime == _loaded_mtime:
+        return _static_prefix_cache
+    prefix_template, _ = _split_template()
     try:
-        return template.format(**fmt_kwargs)
+        rendered = prefix_template.format(
+            name=_persona.get("name", "뉴끼"),
+            personality=_persona.get("personality", ""),
+            speech_style=_persona.get("speech_style", ""),
+        )
+    except KeyError as e:
+        logger.warning(f"[Persona] static prefix format 실패 (missing key {e}), raw 반환")
+        rendered = prefix_template
+    _static_prefix_cache = rendered
+    _static_prefix_mtime = _loaded_mtime
+    return rendered
+
+
+def build_dynamic_suffix(context: dict, recent_memory: str = "") -> str:
+    """Dynamic part — {context}/{recent_memory} 주입. 매 턴 새로 생성."""
+    ctx_str = _build_ctx_str(context)
+    mem_str = recent_memory if recent_memory else "(없음)"
+    _, suffix_template = _split_template()
+    if not suffix_template:
+        # Template had no marker — emit minimal context block
+        return f"{_DYNAMIC_MARKER} {ctx_str}\n\n최근 기억:\n{mem_str}\n"
+    try:
+        return suffix_template.format(context=ctx_str, recent_memory=mem_str)
     except KeyError:
-        # 템플릿에 {recent_memory} 가 없는 경우 안전 fallback — 끝에 덧붙임
-        fmt_kwargs.pop("recent_memory", None)
         try:
-            rendered = template.format(**fmt_kwargs)
+            rendered = suffix_template.format(context=ctx_str)
         except Exception as e:
-            logger.warning(f"[Persona] template format 실패: {e}")
-            rendered = template
+            logger.warning(f"[Persona] dynamic suffix format 실패: {e}")
+            rendered = suffix_template
         return rendered + f"\n\n최근 기억:\n{mem_str}\n"
+
+
+def build_system_prompt(context: dict, recent_memory: str = "") -> str:
+    """Backward-compat wrapper. Returns static prefix + dynamic suffix combined."""
+    return build_static_prefix() + "\n\n" + build_dynamic_suffix(context, recent_memory)
 
 def get_persona() -> dict:
     return _persona
