@@ -65,7 +65,7 @@ HISTORY_SUMMARY_ON_OVERFLOW = 10
 PROACTIVE_TEMPLATES_PATH = os.path.join(os.path.dirname(__file__), "data", "proactive_templates.json")
 
 SCREENSHOT_TTL_SECONDS = 300
-VISION_MODEL_CAPABLE = False
+VISION_MODEL_CAPABLE = True  # Gemma 4 E4B + mmproj-BF16 loaded in llama-server (verified 2026-04-18)
 OCR_LANGUAGES = "kor+eng"
 
 # sometime-central MCP는 이미 macmini.tail6899df.ts.net(Tailscale)에 배포됨.
