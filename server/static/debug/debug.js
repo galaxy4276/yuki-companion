@@ -9,6 +9,46 @@ const state = { paused: false, filter: '', activeTab: 'voice' };
 const counts = { voice: 0, llm: 0, mcp: 0, tts: 0, errors: 0 };
 let unseenErrors = 0;
 
+const LATENCY_RING = { first_chunk: [], first_audio: [], tool_loop: [] };
+
+function _avg(arr) {
+  if (!arr.length) return null;
+  return Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+}
+
+function renderLatencyCard() {
+  let card = document.getElementById('latency-breakdown');
+  if (!card) {
+    card = document.createElement('div');
+    card.id = 'latency-breakdown';
+    card.style.cssText = 'padding:8px 12px;margin:6px 8px;background:#1e293b;border-left:3px solid #38bdf8;border-radius:4px;font-family:ui-monospace,monospace;font-size:12px;color:#e2e8f0;';
+    const llmList = document.getElementById('list-llm');
+    if (llmList && llmList.parentNode) {
+      llmList.parentNode.insertBefore(card, llmList);
+    } else {
+      document.body.insertBefore(card, document.body.firstChild);
+    }
+  }
+  const fc = _avg(LATENCY_RING.first_chunk);
+  const fa = _avg(LATENCY_RING.first_audio);
+  const tl = _avg(LATENCY_RING.tool_loop);
+  const fmt = (v) => (v === null ? '–' : `${v}ms`);
+  card.textContent = `첫 chunk: ${fmt(fc)} | 첫 audio: ${fmt(fa)} | tool loop: ${fmt(tl)} (최근 ${Math.max(LATENCY_RING.first_chunk.length, LATENCY_RING.first_audio.length, LATENCY_RING.tool_loop.length)}회 평균)`;
+}
+
+function updateLatencyRing(evt) {
+  if (evt.stage !== 'msg.done') return;
+  const p = evt.payload || {};
+  for (const k of ['first_chunk_ms', 'first_audio_ms', 'tool_loop_ms']) {
+    if (typeof p[k] === 'number') {
+      const key = k.replace('_ms', '');
+      LATENCY_RING[key].push(p[k]);
+      if (LATENCY_RING[key].length > 10) LATENCY_RING[key].shift();
+    }
+  }
+  renderLatencyCard();
+}
+
 const wsDot = document.getElementById('ws-dot');
 const wsText = document.getElementById('ws-text');
 const filterEl = document.getElementById('filter');
@@ -99,6 +139,8 @@ function render(evt) {
 
   appendTo('list-' + tab, buildCard(evt, fail));
   bumpCount(tab);
+
+  updateLatencyRing(evt);
 
   if (fail) {
     appendTo('list-errors', buildCard(evt, true));

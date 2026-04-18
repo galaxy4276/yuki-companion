@@ -150,7 +150,8 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     await history.save_message(session_id, "user", content, event_type)
     ctx.touch()
 
-    t0 = time.time()
+    waypoints = {"t0": time.time(), "first_chunk_ms": None, "first_audio_ms": None, "tool_loop_ms": None}
+    t0 = waypoints["t0"]
     await events.emit("msg.start", {"content": content, "session_id": session_id, "event_type": event_type, "msg_id": msg_id})
 
     _mem_body = (_memory.load_memory() or "")[-config.RECENT_MEMORY_MAX_CHARS:]
@@ -173,7 +174,9 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
 
     messages = vision.prepare(messages)
     if tools:
+        t_tl = time.time()
         messages = await _tool_loop(messages, tools)
+        waypoints["tool_loop_ms"] = since_ms(t_tl)
 
     await _send_emotion("thinking", 0.7)
 
@@ -190,23 +193,33 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
                 action_sent = True
                 await _send_action(stripper.action)
             if cleaned:
+                if waypoints["first_chunk_ms"] is None and cleaned:
+                    waypoints["first_chunk_ms"] = since_ms(waypoints["t0"])
                 full_text += cleaned
                 await _send({"type": "text_chunk", "content": cleaned, "is_final": False, "message_id": msg_id})
                 for sentence in chunker.feed(cleaned):
-                    tts_tasks.append(_track(_dispatch_tts(sentence, msg_id)))
+                    tts_tasks.append(_track(_dispatch_tts(sentence, msg_id, waypoints)))
         else:
             leftover = stripper.flush()
             if leftover:
                 full_text += leftover
                 await _send({"type": "text_chunk", "content": leftover, "is_final": False, "message_id": msg_id})
                 for sentence in chunker.feed(leftover):
-                    tts_tasks.append(_track(_dispatch_tts(sentence, msg_id)))
-            await events.emit("msg.done", {"msg_id": msg_id, "full_text": full_text, "duration_ms": since_ms(t0), "tts_count": len(tts_tasks)})
+                    tts_tasks.append(_track(_dispatch_tts(sentence, msg_id, waypoints)))
+            await events.emit("msg.done", {
+                "msg_id": msg_id,
+                "full_text": full_text,
+                "duration_ms": since_ms(waypoints["t0"]),
+                "tts_count": len(tts_tasks),
+                "first_chunk_ms": waypoints["first_chunk_ms"],
+                "first_audio_ms": waypoints["first_audio_ms"],
+                "tool_loop_ms": waypoints["tool_loop_ms"],
+            })
             await _send({"type": "text_done", "message_id": msg_id, "full_content": full_text})
 
     tail = chunker.finalize()
     if tail:
-        tts_tasks.append(_track(_dispatch_tts(tail, msg_id)))
+        tts_tasks.append(_track(_dispatch_tts(tail, msg_id, waypoints)))
 
     await history.save_message(session_id, "assistant", full_text, event_type)
     emotion, intensity = persona.classify_emotion(full_text)
@@ -219,11 +232,13 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
 async def _noop_list() -> list:
     return []
 
-async def _dispatch_tts(text: str, msg_id: str):
+async def _dispatch_tts(text: str, msg_id: str, waypoints: dict | None = None):
     if not text:
         return
     wav = await tts.synthesize(text)
     if wav:
+        if waypoints and waypoints.get("first_audio_ms") is None:
+            waypoints["first_audio_ms"] = since_ms(waypoints["t0"])
         await _send({"type": "audio_response", "data": tts.to_base64(wav), "message_id": msg_id})
     else:
         await _send({"type": "error", "source": "tts", "message": "TTS 합성 실패"})
