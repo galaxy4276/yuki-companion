@@ -228,15 +228,6 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
                 await _send({"type": "text_chunk", "content": leftover, "is_final": False, "message_id": msg_id})
                 for sentence in chunker.feed(leftover):
                     tts_tasks.append(_track(_dispatch_tts(sentence, msg_id, waypoints)))
-            await events.emit("msg.done", {
-                "msg_id": msg_id,
-                "full_text": full_text,
-                "duration_ms": since_ms(waypoints["t0"]),
-                "tts_count": len(tts_tasks),
-                "first_chunk_ms": waypoints["first_chunk_ms"],
-                "first_audio_ms": waypoints["first_audio_ms"],
-                "tool_loop_ms": waypoints["tool_loop_ms"],
-            })
             await _send({"type": "text_done", "message_id": msg_id, "full_content": full_text})
 
     tail = chunker.finalize()
@@ -249,6 +240,15 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     if not action_sent:
         await _send_action(random.choice(persona.EXPRESSIVE_ACTIONS))
     await asyncio.gather(*tts_tasks, return_exceptions=True)
+    await events.emit("msg.done", {
+        "msg_id": msg_id,
+        "full_text": full_text,
+        "duration_ms": since_ms(waypoints["t0"]),
+        "tts_count": len(tts_tasks),
+        "first_chunk_ms": waypoints["first_chunk_ms"],
+        "first_audio_ms": waypoints["first_audio_ms"],
+        "tool_loop_ms": waypoints["tool_loop_ms"],
+    })
     _track(_maybe_summarize(session_id))
 
 async def _noop_list() -> list:
