@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import random
+import re
 import time
 import uuid
 from collections import deque
@@ -22,6 +23,21 @@ import core.context as ctx
 from core.logging import logger
 from core import events
 from core.events import since_ms
+
+_TOOL_KEYWORDS = re.compile(
+    r"(매출|DAU|MAU|매칭|유저|구슬|CS|리뷰|지표|Linear|이슈|"
+    r"가입|리텐션|결제|오늘|어제|이번주|지난주|얼마|몇|건수|"
+    r"health|사실|기억해|이거 중요|앞으로|memory|wiki)",
+    re.IGNORECASE,
+)
+_CHITCHAT_MAX_CHARS = 40
+
+def _needs_tools(content: str) -> bool:
+    if not content:
+        return False
+    if len(content) <= _CHITCHAT_MAX_CHARS and not _TOOL_KEYWORDS.search(content):
+        return False
+    return True
 
 _broadcaster: Callable[[dict], Awaitable[None]] | None = None
 _tasks: set[asyncio.Task] = set()
@@ -173,10 +189,14 @@ async def handle_message(content: str, session_id: str, event_type: str = "text"
     messages.extend(recent)
 
     messages = vision.prepare(messages)
-    if tools:
+    if tools and _needs_tools(content):
         t_tl = time.time()
         messages = await _tool_loop(messages, tools)
         waypoints["tool_loop_ms"] = since_ms(t_tl)
+    else:
+        waypoints["tool_loop_ms"] = 0
+        if tools:
+            await events.emit("tool_loop.skip", {"reason": "chitchat", "content_len": len(content)})
 
     await _send_emotion("thinking", 0.7)
 
